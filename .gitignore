@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+data/
+outputs/
+tmp/
+*.log
+youtube_cookies*
+secrets/*
+!secrets/.gitkeep
+packages/database/prisma/dev.db

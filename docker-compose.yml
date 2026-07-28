@@ -1,0 +1,192 @@
+name: etm-class-engine
+
+x-app-environment: &app-environment
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-etm}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-etm}
+  REDIS_URL: redis://redis:6379
+  ETM_API_SECRET: ${ETM_API_SECRET}
+  ALLOWED_CIDRS: ${ALLOWED_CIDRS}
+  AI_PROVIDER: ${AI_PROVIDER:-openai}
+  TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-}
+  ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-}
+  VISUAL_PROVIDER: ${VISUAL_PROVIDER:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      ETM_DOMAIN: ${ETM_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - '${ETM_HTTP_PORT:-80}:80'
+      - '${ETM_HTTPS_PORT:-443}:443'
+      - '${ETM_HTTPS_PORT:-443}:443/udp'
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      edge:
+      backend:
+        ipv4_address: 172.29.0.10
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api:
+    build:
+      context: .
+      target: api
+      args:
+        NODE_VERSION: '24.18.0'
+    restart: unless-stopped
+    command: ['sh', '-c', 'npm run db:migrate && exec node dist/apps/api/src/main.js']
+    environment:
+      <<: *app-environment
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      CADDY_TRUSTED_PROXIES: 172.29.0.10/32
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-30}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build:
+      context: .
+      target: worker
+      args:
+        NODE_VERSION: '24.18.0'
+        YT_DLP_VERSION: '2026.06.09'
+        YT_DLP_SHA256: e5d57466682cfa9d61e9cf7c8a4f09b00f4a62af37d3bbdc4bcffdf63615feac
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      TRANSCRIPTION_CONCURRENCY: ${TRANSCRIPTION_CONCURRENCY:-1}
+      JOB_DATA_ROOT: /data/jobs
+      MIN_FREE_DISK_BYTES: ${MIN_FREE_DISK_BYTES:-1073741824}
+      MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-14400}
+      ALLOWED_YOUTUBE_CHANNEL_IDS: ${ALLOWED_YOUTUBE_CHANNEL_IDS:-}
+      YOUTUBE_COOKIES_PATH: /run/secrets/youtube_cookies
+      YTDLP_METADATA_TIMEOUT_MS: ${YTDLP_METADATA_TIMEOUT_MS:-60000}
+      YTDLP_DOWNLOAD_TIMEOUT_MS: ${YTDLP_DOWNLOAD_TIMEOUT_MS:-7200000}
+      FFMPEG_TIMEOUT_MS: ${FFMPEG_TIMEOUT_MS:-7200000}
+      AUDIO_CHUNK_SECONDS: ${AUDIO_CHUNK_SECONDS:-600}
+      AUDIO_CHUNK_OVERLAP_SECONDS: ${AUDIO_CHUNK_OVERLAP_SECONDS:-3}
+      OPENAI_TRANSCRIPTION_MODEL: ${OPENAI_TRANSCRIPTION_MODEL:-whisper-1}
+      OPENAI_ANALYSIS_MODEL: ${OPENAI_ANALYSIS_MODEL:-gpt-5.6-sol}
+      OPENAI_VISUAL_MODEL: ${OPENAI_VISUAL_MODEL:-gpt-5.6-sol}
+      OPENAI_REQUEST_TIMEOUT_MS: ${OPENAI_REQUEST_TIMEOUT_MS:-600000}
+      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+      GEMINI_TRANSCRIPTION_MODEL: ${GEMINI_TRANSCRIPTION_MODEL:-gemini-3.6-flash}
+      GEMINI_ANALYSIS_MODEL: ${GEMINI_ANALYSIS_MODEL:-gemini-3.6-flash}
+      GEMINI_VISUAL_MODEL: ${GEMINI_VISUAL_MODEL:-gemini-3.6-flash}
+      GEMINI_REQUEST_TIMEOUT_MS: ${GEMINI_REQUEST_TIMEOUT_MS:-600000}
+      ENABLE_VISUAL_ANALYSIS: ${ENABLE_VISUAL_ANALYSIS:-false}
+      MAX_ANALYSIS_FRAMES: ${MAX_ANALYSIS_FRAMES:-40}
+      MAX_ANALYSIS_JSON_CHARACTERS: ${MAX_ANALYSIS_JSON_CHARACTERS:-95000}
+      N8N_CALLBACK_URL: ${N8N_CALLBACK_URL:-}
+      N8N_CALLBACK_SECRET: ${N8N_CALLBACK_SECRET:-}
+      CALLBACK_MAX_ATTEMPTS: ${CALLBACK_MAX_ATTEMPTS:-6}
+    volumes:
+      - job_data:/data/jobs
+    secrets:
+      - youtube_cookies
+    networks:
+      - backend
+      - egress
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('fs').stat('/tmp/worker-heartbeat',(e,s)=>{if(e||Date.now()-s.mtimeMs>90000)process.exit(1)})",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  postgres:
+    image: postgres:17.10-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-etm}
+      POSTGRES_USER: ${POSTGRES_USER:-etm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8.6.5-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--save', '60', '1']
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  edge:
+  egress:
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+
+volumes:
+  postgres_data:
+  redis_data:
+  job_data:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  youtube_cookies:
+    file: ${YOUTUBE_COOKIES_HOST_PATH:-./secrets/youtube_cookies}

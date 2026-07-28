@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "video_id": "DEMOclass01",
+    "video_url": "https://www.youtube.com/watch?v=DEMOclass01",
+    "title": "Present Perfect Workshop",
+    "class_date": "2026-07-16",
+    "teacher": "Alex Morgan",
+    "course": "English Workshop",
+    "duration_seconds": 2700,
+    "processed_at": "2026-07-16T18:45:00.000Z",
+    "transcription_model": "whisper-1",
+    "analysis_model": "example-model",
+    "visual_analysis_enabled": true
+  },
+  "language": "English",
+  "estimated_level": "B1",
+  "summary": "A practical lesson on using the present perfect to discuss life experiences.",
+  "learning_objectives": [
+    "Distinguish finished past events from unspecified life experiences.",
+    "Form present-perfect questions and short answers."
+  ],
+  "sections": [
+    {
+      "start": "00:00:00",
+      "end": "00:12:30",
+      "title": "Concept introduction",
+      "summary": "The teacher contrasts the simple past with the present perfect.",
+      "visual_context": "A slide shows have or has followed by a past participle."
+    },
+    {
+      "start": "00:12:30",
+      "end": "00:45:00",
+      "title": "Guided speaking practice",
+      "summary": "Students ask and answer questions about experiences.",
+      "visual_context": "Conversation prompts are visible on the shared screen."
+    }
+  ],
+  "key_concepts": [
+    {
+      "concept": "Unspecified time",
+      "explanation": "The present perfect connects a past experience to the present without naming a finished time.",
+      "examples": ["I have visited Lisbon.", "She has never tried surfing."]
+    }
+  ],
+  "vocabulary": [
+    {
+      "term": "experience",
+      "meaning": "Something that has happened to or been done by a person.",
+      "example": "Travel can be a valuable experience.",
+      "timestamp": "00:07:18"
+    }
+  ],
+  "grammar": [
+    {
+      "topic": "Present perfect",
+      "explanation": "Use have or has plus the past participle.",
+      "examples": ["Have you ever flown in a helicopter?", "He has not finished yet."],
+      "timestamp": "00:04:10"
+    }
+  ],
+  "pronunciation": [
+    {
+      "item": "Contracted forms",
+      "guidance": "Practise the reduced forms in I've and she's.",
+      "timestamp": "00:18:42"
+    }
+  ],
+  "teacher_corrections": [
+    {
+      "original": "I have went to Rome.",
+      "correction": "I have gone to Rome.",
+      "explanation": "Gone is the past participle of go.",
+      "timestamp": "00:24:05"
+    }
+  ],
+  "student_difficulties": [
+    "Choosing between the simple past and present perfect.",
+    "Remembering irregular past participles."
+  ],
+  "visual_materials": [
+    {
+      "timestamp": "00:03:55",
+      "description": "A grammar slide displays subject, auxiliary, and past-participle columns.",
+      "relevance": "It reinforces the sentence structure explained in the audio."
+    }
+  ],
+  "suggested_exercises": [
+    {
+      "instruction": "Write five Have you ever questions and interview a partner.",
+      "answer_or_key": "Answers vary; each question should use have plus a past participle."
+    }
+  ],
+  "next_steps": [
+    "Review common irregular past participles.",
+    "Contrast ever and never with already and yet."
+  ],
+  "transcript": "[00:00:00 - 00:00:05] Today we're going to talk about life experiences.\n[00:00:05 - 00:00:10] Have you ever visited another country?",
+  "processing_warning": null
+}

@@ -1,0 +1,21 @@
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+
+{$ETM_DOMAIN:localhost} {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format filter {
+			request>headers>X-Etm-Signature delete
+			request>headers>X-Etm-Timestamp delete
+			request>headers>Idempotency-Key delete
+			request>headers>Cookie delete
+			request>headers>Authorization delete
+		}
+	}
+
+	reverse_proxy api:3000
+}

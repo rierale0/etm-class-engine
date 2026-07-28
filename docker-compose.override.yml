@@ -1,0 +1,7 @@
+services:
+  api:
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+  worker:
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}

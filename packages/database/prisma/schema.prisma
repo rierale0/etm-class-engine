@@ -1,0 +1,35 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Job {
+  id                   String   @id @db.Uuid
+  videoId              String
+  status               String
+  progress             Int      @default(0)
+  requestPayload       Json
+  resultJson           Json?
+  resultCharacterCount Int?
+  warnings             Json?
+  errorCode            String?
+  errorMessage         String?
+  attemptCount         Int      @default(0)
+  idempotencyKey       String   @unique
+  payloadHash          String
+  callbackStatus       String   @default("pending")
+  callbackAttempts     Int      @default(0)
+  callbackLastError    String?
+  cancelRequestedAt    DateTime?
+  createdAt            DateTime @default(now())
+  startedAt            DateTime?
+  completedAt          DateTime?
+  updatedAt            DateTime @updatedAt
+
+  @@index([videoId])
+  @@index([status, updatedAt])
+}

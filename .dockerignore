@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+node_modules
+dist
+coverage
+data
+outputs
+secrets
+tmp
+*.dump
+*.log
+youtube_cookies*
