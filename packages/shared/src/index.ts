@@ -167,6 +167,120 @@ export const analysisSchema = z
 
 export type ClassAnalysis = z.infer<typeof analysisSchema>;
 
+const batchClassSchema = z
+  .object({
+    job_id: z.string().uuid(),
+    video_url: z.string().url(),
+    submission: z
+      .object({
+        title: nonEmpty,
+        class_date: z.string().date(),
+        teacher: nonEmpty,
+        course: nonEmpty,
+        analyze_visuals: z.boolean(),
+      })
+      .strict(),
+    analysis: analysisSchema,
+  })
+  .strict();
+
+export const batchResultSchema = z
+  .object({
+    schema_version: z.literal(1),
+    batch: z
+      .object({
+        id: z.string().uuid(),
+        name: nonEmpty,
+        status: z.literal('ready'),
+        class_count: z.number().int().positive(),
+        created_at: z.string().datetime(),
+        completed_at: z.string().datetime(),
+      })
+      .strict(),
+    order: z.array(videoIdSchema),
+    classes: z.record(videoIdSchema, batchClassSchema),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.order.length !== value.batch.class_count) {
+      context.addIssue({ code: 'custom', message: 'Batch class count does not match order' });
+    }
+    if (new Set(value.order).size !== value.order.length) {
+      context.addIssue({ code: 'custom', message: 'Batch order contains duplicate video IDs' });
+    }
+    if (Object.keys(value.classes).length !== value.order.length) {
+      context.addIssue({ code: 'custom', message: 'Batch classes do not match order' });
+    }
+    for (const videoId of value.order) {
+      if (!(videoId in value.classes)) {
+        context.addIssue({ code: 'custom', message: `Batch class ${videoId} is missing` });
+      }
+    }
+  });
+
+export type BatchResult = z.infer<typeof batchResultSchema>;
+
+export interface BatchAssemblyJob {
+  id: string;
+  videoId: string;
+  requestPayload: unknown;
+  resultJson?: unknown;
+  status: string;
+  completedAt: Date | null;
+}
+
+export interface BatchAssemblyInput {
+  id: string;
+  name: string;
+  createdAt: Date;
+  jobs: BatchAssemblyJob[];
+}
+
+export function assembleBatchResult(input: BatchAssemblyInput): BatchResult {
+  if (input.jobs.length === 0) throw new Error('A batch must contain at least one class');
+  const order: string[] = [];
+  const classes: Record<string, z.infer<typeof batchClassSchema>> = {};
+  let completedAt = 0;
+
+  for (const job of input.jobs) {
+    if (job.status !== 'completed' || job.resultJson === null) {
+      throw new Error('Every class must be completed before assembling the batch');
+    }
+    if (classes[job.videoId]) throw new Error('A batch cannot contain duplicate video IDs');
+    const request = analyzeRequestSchema.parse(job.requestPayload);
+    const analysis = analysisSchema.parse(job.resultJson);
+    if (!job.completedAt) throw new Error('A completed class must have a completion timestamp');
+    completedAt = Math.max(completedAt, job.completedAt.getTime());
+    order.push(job.videoId);
+    classes[job.videoId] = {
+      job_id: job.id,
+      video_url: `https://www.youtube.com/watch?v=${job.videoId}`,
+      submission: {
+        title: request.title,
+        class_date: request.classDate,
+        teacher: request.teacher,
+        course: request.course,
+        analyze_visuals: request.analyzeVisuals,
+      },
+      analysis,
+    };
+  }
+
+  return batchResultSchema.parse({
+    schema_version: 1,
+    batch: {
+      id: input.id,
+      name: input.name,
+      status: 'ready',
+      class_count: input.jobs.length,
+      created_at: input.createdAt.toISOString(),
+      completed_at: new Date(completedAt).toISOString(),
+    },
+    order,
+    classes,
+  });
+}
+
 export interface TranscriptSegment {
   start: string;
   end: string;

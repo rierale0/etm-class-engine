@@ -14,39 +14,46 @@ export const localAppHtml = String.raw`<!doctype html>
         <div>
           <p class="eyebrow">LOCAL ANALYSIS WORKSPACE</p>
           <h1>ETM Class Engine</h1>
-          <p class="subtitle">Procesa clases de YouTube desde tu conexión local y entrega el resultado a n8n.</p>
+          <p class="subtitle">Procesa una o varias clases y reúne todos los análisis en un único JSON listo para n8n.</p>
         </div>
         <div class="system-state"><span class="pulse"></span> Motor disponible</div>
       </header>
 
-      <section class="panel submit-panel" aria-labelledby="new-analysis-title">
+      <section class="panel submit-panel" aria-labelledby="new-batch-title">
         <div class="section-heading">
           <div>
             <p class="step">01 · ENTRADA</p>
-            <h2 id="new-analysis-title">Nueva clase</h2>
+            <h2 id="new-batch-title">Nuevo lote</h2>
           </div>
           <button type="button" class="button secondary" id="add-video">+ Añadir video</button>
         </div>
 
-        <form id="job-form">
+        <form id="batch-form">
+          <div class="batch-fields">
+            <label class="field">
+              <span>Nombre del lote</span>
+              <input name="batchName" id="batch-name" type="text" maxlength="300" required>
+            </label>
+            <p class="batch-help">El lote puede contener uno o varios videos. n8n recibirá un solo JSON.</p>
+          </div>
           <div id="video-rows" class="video-rows"></div>
           <div class="form-footer">
             <p id="form-message" class="form-message" role="status"></p>
-            <button type="submit" class="button primary" id="submit-jobs">Enviar a procesamiento</button>
+            <button type="submit" class="button primary" id="submit-batch">Procesar lote</button>
           </div>
         </form>
       </section>
 
-      <section class="panel jobs-panel" aria-labelledby="jobs-title">
+      <section class="panel batches-panel" aria-labelledby="batches-title">
         <div class="section-heading">
           <div>
-            <p class="step">02 · PROCESAMIENTO</p>
-            <h2 id="jobs-title">Trabajos recientes</h2>
+            <p class="step">02 · LOTES</p>
+            <h2 id="batches-title">Procesamiento y entregas</h2>
           </div>
-          <button type="button" class="button ghost" id="refresh-jobs">Actualizar</button>
+          <button type="button" class="button ghost" id="refresh-batches">Actualizar</button>
         </div>
-        <div id="jobs" class="jobs" aria-live="polite">
-          <p class="empty">Cargando trabajos…</p>
+        <div id="batches" class="batches" aria-live="polite">
+          <p class="empty">Cargando lotes…</p>
         </div>
       </section>
     </main>
@@ -71,7 +78,7 @@ export const localAppHtml = String.raw`<!doctype html>
         </label>
         <label class="field">
           <span>Curso</span>
-          <input name="course" type="text" maxlength="200" required placeholder="Workshops V8">
+          <input name="course" type="text" maxlength="200" required value="English Usage">
         </label>
         <label class="field">
           <span>Título</span>
@@ -81,8 +88,8 @@ export const localAppHtml = String.raw`<!doctype html>
           <input name="analyzeVisuals" type="checkbox">
           <span class="toggle"></span>
           <span>
-            <strong>Análisis visual</strong>
-            <small>Extrae y analiza fotogramas relevantes</small>
+            <strong>Procesamiento completo</strong>
+            <small>Audio y análisis de fotogramas</small>
           </span>
         </label>
       </fieldset>
@@ -91,8 +98,8 @@ export const localAppHtml = String.raw`<!doctype html>
     <dialog id="result-dialog">
       <div class="dialog-heading">
         <div>
-          <p class="step">RESULTADO JSON</p>
-          <h2 id="dialog-title">Análisis</h2>
+          <p class="step">JSON COMBINADO</p>
+          <h2 id="dialog-title">Lote</h2>
         </div>
         <button type="button" class="dialog-close" id="close-dialog" aria-label="Cerrar">×</button>
       </div>
@@ -105,6 +112,7 @@ export const localAppCss = String.raw`:root {
   --bg: #090b0f;
   --surface: #11151b;
   --surface-2: #171c24;
+  --surface-3: #0d1015;
   --line: #29313d;
   --text: #f4f7fb;
   --muted: #94a0af;
@@ -130,17 +138,20 @@ body {
 }
 button, input { font: inherit; }
 button { cursor: pointer; }
+a { text-decoration: none; }
 .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
 .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
 .eyebrow, .step { margin: 0 0 8px; color: var(--accent); font-size: .72rem; font-weight: 800; letter-spacing: .16em; }
 h1 { margin: 0; font-size: clamp(2.4rem, 6vw, 4.8rem); line-height: .98; letter-spacing: -.055em; }
 h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.025em; }
-.subtitle { max-width: 660px; margin: 18px 0 0; color: var(--muted); font-size: 1.05rem; line-height: 1.65; }
+.subtitle { max-width: 720px; margin: 18px 0 0; color: var(--muted); font-size: 1.05rem; line-height: 1.65; }
 .system-state { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .82rem; white-space: nowrap; padding-top: 8px; }
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 6px rgba(117, 240, 178, .09); }
 .panel { background: rgba(17, 21, 27, .92); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 24px 80px rgba(0,0,0,.22); }
 .panel + .panel { margin-top: 24px; }
 .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 24px 26px; border-bottom: 1px solid var(--line); }
+.batch-fields { display: grid; grid-template-columns: minmax(260px, 1fr) 1fr; align-items: end; gap: 24px; padding: 22px 26px; background: var(--surface-2); }
+.batch-help { margin: 0 0 12px; color: var(--muted); font-size: .82rem; line-height: 1.5; }
 .video-rows { display: grid; gap: 1px; background: var(--line); }
 .video-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 0; padding: 26px; border: 0; background: var(--surface); }
 .row-heading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; }
@@ -151,7 +162,7 @@ h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.025em; }
 .field-wide { grid-column: 1 / -1; }
 .field input {
   width: 100%; border: 1px solid #303947; border-radius: 10px; outline: 0;
-  background: #0d1015; color: var(--text); padding: 13px 14px; transition: border-color .15s, box-shadow .15s;
+  background: var(--surface-3); color: var(--text); padding: 13px 14px; transition: border-color .15s, box-shadow .15s;
 }
 .field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(117, 240, 178, .1); }
 .visual-toggle { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; color: var(--text); cursor: pointer; }
@@ -166,31 +177,35 @@ h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.025em; }
 .form-message { margin: 0; color: var(--muted); font-size: .88rem; }
 .form-message.error { color: var(--danger); }
 .form-message.success { color: var(--accent); }
-.button { border: 1px solid transparent; border-radius: 9px; padding: 10px 15px; font-size: .84rem; font-weight: 750; transition: transform .12s, background .12s, border-color .12s; }
+.button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 9px; padding: 10px 15px; font-size: .84rem; font-weight: 750; transition: transform .12s, background .12s, border-color .12s; }
 .button:hover { transform: translateY(-1px); }
 .button:disabled { opacity: .5; cursor: wait; transform: none; }
 .primary { padding: 12px 18px; background: var(--accent); color: var(--accent-ink); }
 .secondary { border-color: var(--line); background: var(--surface-2); color: var(--text); }
 .ghost { border-color: var(--line); background: transparent; color: var(--muted); }
-.jobs { min-height: 140px; }
+.batches { min-height: 140px; }
 .empty { margin: 0; padding: 52px 26px; text-align: center; color: var(--muted); }
-.job { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(190px, .8fr) auto; gap: 24px; align-items: center; padding: 22px 26px; border-bottom: 1px solid var(--line); }
-.job:last-child { border-bottom: 0; }
-.job-title { margin: 0 0 7px; font-size: 1rem; }
-.job-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: .78rem; }
-.job-meta a { color: var(--blue); text-decoration: none; }
-.status-row { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: .76rem; color: var(--muted); }
+.batch { padding: 24px 26px; border-bottom: 1px solid var(--line); }
+.batch:last-child { border-bottom: 0; }
+.batch-top { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, .8fr) auto; gap: 24px; align-items: center; }
+.batch-title { margin: 0 0 8px; font-size: 1.08rem; }
+.batch-meta, .class-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: .78rem; }
+.batch-status-row { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: .76rem; color: var(--muted); }
 .progress { appearance: none; display: block; width: 100%; height: 6px; overflow: hidden; border: 0; border-radius: 999px; background: #29303a; }
 .progress::-webkit-progress-bar { border-radius: 999px; background: #29303a; }
 .progress::-webkit-progress-value { border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--blue)); }
 .progress::-moz-progress-bar { border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--blue)); }
-.job-state .badge { margin-top: 10px; }
-.badge { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; font-size: .7rem; color: var(--muted); }
-.badge.failed { border-color: rgba(255,133,133,.35); color: var(--danger); }
-.badge.sent { border-color: rgba(117,240,178,.3); color: var(--accent); }
-.job-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.badge { display: inline-flex; align-items: center; margin-top: 10px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; font-size: .7rem; color: var(--muted); }
+.badge.failed, .badge.attention_required { border-color: rgba(255,133,133,.35); color: var(--danger); }
+.badge.sent, .badge.ready { border-color: rgba(117,240,178,.3); color: var(--accent); }
+.badge.pending, .badge.processing { border-color: rgba(121,168,255,.35); color: var(--blue); }
+.batch-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .small { padding: 7px 10px; font-size: .75rem; }
-.job-error { margin: 9px 0 0; color: var(--danger); font-size: .78rem; }
+.classes { display: grid; gap: 8px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.class-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(170px, .55fr) auto; gap: 20px; align-items: center; padding: 12px 14px; border: 1px solid #222a34; border-radius: 10px; background: var(--surface-3); }
+.class-title { margin: 0 0 5px; font-size: .86rem; }
+.class-meta a { color: var(--blue); }
+.class-error { margin: 6px 0 0; color: var(--danger); font-size: .76rem; }
 dialog { width: min(980px, calc(100% - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--line); border-radius: 16px; color: var(--text); background: var(--surface); box-shadow: 0 30px 100px rgba(0,0,0,.65); }
 dialog::backdrop { background: rgba(2,4,7,.78); backdrop-filter: blur(5px); }
 .dialog-heading { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid var(--line); }
@@ -201,10 +216,10 @@ dialog::backdrop { background: rgba(2,4,7,.78); backdrop-filter: blur(5px); }
   .shell { width: min(100% - 20px, 1180px); padding-top: 28px; }
   .hero { display: block; }
   .system-state { margin-top: 20px; }
-  .video-row { grid-template-columns: 1fr; padding: 20px; }
+  .batch-fields, .video-row, .batch-top, .class-row { grid-template-columns: 1fr; }
+  .video-row { padding: 20px; }
   .field-wide, .visual-toggle, .row-heading { grid-column: 1; }
-  .job { grid-template-columns: 1fr; gap: 16px; padding: 20px; }
-  .job-actions { justify-content: flex-start; }
+  .batch-actions { justify-content: flex-start; }
   .section-heading, .form-footer { align-items: flex-start; }
   .form-footer { flex-direction: column; }
   .primary { width: 100%; }
@@ -213,14 +228,16 @@ dialog::backdrop { background: rgba(2,4,7,.78); backdrop-filter: blur(5px); }
 export const localAppJavaScript = String.raw`(() => {
   const rows = document.querySelector('#video-rows');
   const template = document.querySelector('#video-row-template');
-  const form = document.querySelector('#job-form');
+  const form = document.querySelector('#batch-form');
+  const batchName = document.querySelector('#batch-name');
   const message = document.querySelector('#form-message');
-  const submitButton = document.querySelector('#submit-jobs');
-  const jobsContainer = document.querySelector('#jobs');
+  const submitButton = document.querySelector('#submit-batch');
+  const batchesContainer = document.querySelector('#batches');
   const dialog = document.querySelector('#result-dialog');
   const resultJson = document.querySelector('#result-json');
   const dialogTitle = document.querySelector('#dialog-title');
   let visualAnalysisEnabled = false;
+  let maximumBatchVideos = 10;
 
   const stages = {
     queued: 'En cola',
@@ -231,10 +248,26 @@ export const localAppJavaScript = String.raw`(() => {
     extracting_frames: 'Extrayendo fotogramas',
     analyzing_visuals: 'Analizando imágenes',
     synthesizing: 'Construyendo análisis',
-    sending_callback: 'Enviando a n8n',
     completed: 'Completado',
     failed: 'Fallido'
   };
+  const batchStates = {
+    processing: 'Procesando',
+    ready: 'Listo para enviar',
+    attention_required: 'Requiere atención'
+  };
+  const callbackStates = {
+    not_sent: 'n8n · no enviado',
+    pending: 'n8n · enviando',
+    sent: 'n8n · enviado',
+    failed: 'n8n · envío fallido',
+    disabled: 'n8n · desactivado'
+  };
+
+  function defaultBatchName() {
+    const date = new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
+    return 'English Usage — ' + date;
+  }
 
   function addRow(copyPrevious) {
     const fragment = template.content.cloneNode(true);
@@ -250,6 +283,8 @@ export const localAppJavaScript = String.raw`(() => {
       row.remove();
       numberRows();
     });
+    const visualInput = row.querySelector('[name="analyzeVisuals"]');
+    visualInput.addEventListener('change', () => { visualInput.dataset.touched = 'true'; });
     syncVisualControl(row);
     rows.appendChild(fragment);
     numberRows();
@@ -259,9 +294,10 @@ export const localAppJavaScript = String.raw`(() => {
     const input = row.querySelector('[name="analyzeVisuals"]');
     const description = row.querySelector('.visual-toggle small');
     input.disabled = !visualAnalysisEnabled;
+    if (visualAnalysisEnabled && !input.dataset.touched) input.checked = true;
     if (!visualAnalysisEnabled) input.checked = false;
     description.textContent = visualAnalysisEnabled
-      ? 'Extrae y analiza fotogramas relevantes'
+      ? 'Audio y análisis de fotogramas'
       : 'Actívalo en .env con ENABLE_VISUAL_ANALYSIS=true';
   }
 
@@ -271,7 +307,9 @@ export const localAppJavaScript = String.raw`(() => {
       if (!response.ok) return;
       const capabilities = await response.json();
       visualAnalysisEnabled = capabilities.visualAnalysisEnabled === true;
+      maximumBatchVideos = capabilities.maximumBatchVideos || 10;
       rows.querySelectorAll('.video-row').forEach(syncVisualControl);
+      numberRows();
     } catch {
       visualAnalysisEnabled = false;
     }
@@ -283,6 +321,7 @@ export const localAppJavaScript = String.raw`(() => {
       row.querySelector('.row-number').textContent = String(index + 1);
       row.querySelector('.remove-row').hidden = current.length === 1;
     });
+    document.querySelector('#add-video').disabled = current.length >= maximumBatchVideos;
   }
 
   function payloadFor(row) {
@@ -296,37 +335,27 @@ export const localAppJavaScript = String.raw`(() => {
     };
   }
 
-  async function submitJob(payload) {
-    const response = await fetch('/ui/jobs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.message || 'No se pudo crear el trabajo');
-    return body;
-  }
-
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
     submitButton.disabled = true;
     message.className = 'form-message';
-    message.textContent = 'Creando trabajos…';
+    message.textContent = 'Creando lote…';
     try {
-      const payloads = [...rows.querySelectorAll('.video-row')].map(payloadFor);
-      const results = await Promise.allSettled(payloads.map(submitJob));
-      const created = results.filter((result) => result.status === 'fulfilled').length;
-      const errors = results.filter((result) => result.status === 'rejected');
-      if (errors.length) {
-        message.className = 'form-message error';
-        message.textContent = created + ' creado(s). ' + errors.map((error) => error.reason.message).join(' · ');
-      } else {
-        message.className = 'form-message success';
-        message.textContent = created + (created === 1 ? ' trabajo enviado.' : ' trabajos enviados.');
-        [...rows.querySelectorAll('[name="videoUrl"]')].forEach((input) => { input.value = ''; });
-      }
-      await loadJobs();
+      const response = await fetch('/ui/batches', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: batchName.value.trim(),
+          videos: [...rows.querySelectorAll('.video-row')].map(payloadFor)
+        })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'No se pudo crear el lote');
+      message.className = 'form-message success';
+      message.textContent = 'Lote creado con ' + String(body.jobIds.length) + (body.jobIds.length === 1 ? ' clase.' : ' clases.');
+      rows.querySelectorAll('[name="videoUrl"]').forEach((input) => { input.value = ''; });
+      await loadBatches();
     } catch (error) {
       message.className = 'form-message error';
       message.textContent = error.message;
@@ -345,102 +374,160 @@ export const localAppJavaScript = String.raw`(() => {
   function actionButton(label, handler, className) {
     const button = node('button', 'button small ' + (className || 'ghost'), label);
     button.type = 'button';
-    button.addEventListener('click', handler);
+    button.addEventListener('click', () => handler(button));
     return button;
   }
 
-  function renderJob(job) {
-    const article = node('article', 'job');
-    const identity = node('div', 'job-identity');
-    identity.appendChild(node('h3', 'job-title', job.request?.title || 'Clase de inglés'));
-    const meta = node('div', 'job-meta');
+  function progressBlock(label, progress) {
+    const container = node('div', 'batch-progress');
+    const statusRow = node('div', 'batch-status-row');
+    statusRow.append(node('span', '', label), node('span', '', String(progress) + '%'));
+    const bar = node('progress', 'progress');
+    bar.max = 100;
+    bar.value = progress;
+    container.append(statusRow, bar);
+    return container;
+  }
+
+  function renderClass(job, batchId) {
+    const row = node('div', 'class-row');
+    const identity = node('div', '');
+    identity.append(node('h4', 'class-title', job.request?.title || 'Clase de inglés'));
+    const meta = node('div', 'class-meta');
     const link = node('a', '', job.videoId);
     link.href = job.videoUrl;
     link.target = '_blank';
     link.rel = 'noreferrer';
     meta.append(link);
     if (job.request?.teacher) meta.append(node('span', '', job.request.teacher));
-    if (job.request?.course) meta.append(node('span', '', job.request.course));
     if (job.request?.classDate) meta.append(node('span', '', job.request.classDate));
     identity.append(meta);
-    if (job.error) identity.append(node('p', 'job-error', job.error.message));
+    if (job.error) identity.append(node('p', 'class-error', job.error.message));
+    const actions = node('div', 'batch-actions');
+    if (job.status === 'failed') {
+      actions.append(actionButton('Reintentar clase', (button) => retryClass(batchId, job.jobId, button), 'ghost'));
+    }
+    row.append(identity, progressBlock(stages[job.status] || job.status, job.progress), actions);
+    return row;
+  }
 
-    const state = node('div', 'job-state');
-    const statusRow = node('div', 'status-row');
-    statusRow.append(node('span', '', stages[job.status] || job.status));
-    statusRow.append(node('span', '', String(job.progress) + '%'));
-    state.append(statusRow);
-    const progress = node('progress', 'progress');
-    progress.max = 100;
-    progress.value = job.progress;
-    state.append(progress);
-    const callbackBadge = node('span', 'badge ' + job.callback.status, 'n8n · ' + job.callback.status);
-    callbackBadge.title = job.callback.lastError || '';
+  function renderBatch(batch) {
+    const article = node('article', 'batch');
+    const top = node('div', 'batch-top');
+    const identity = node('div', '');
+    identity.append(node('h3', 'batch-title', batch.name));
+    const meta = node('div', 'batch-meta');
+    meta.append(
+      node('span', '', String(batch.completedClasses) + ' de ' + String(batch.totalClasses) + ' completadas'),
+      node('span', '', new Date(batch.timestamps.createdAt).toLocaleString('es-ES'))
+    );
+    identity.append(meta);
+
+    const state = node('div', '');
+    state.append(progressBlock(batchStates[batch.status] || batch.status, batch.progress));
+    const callbackBadge = node('span', 'badge ' + batch.callback.status, callbackStates[batch.callback.status] || batch.callback.status);
+    callbackBadge.title = batch.callback.lastError || '';
     state.append(callbackBadge);
 
-    const actions = node('div', 'job-actions');
-    if (job.resultAvailable) {
-      actions.append(actionButton('Ver resultado', () => showResult(job.jobId), 'secondary'));
+    const actions = node('div', 'batch-actions');
+    if (batch.resultAvailable) {
+      actions.append(actionButton('Ver JSON combinado', () => showResult(batch.batchId), 'secondary'));
       const download = node('a', 'button small ghost', 'Descargar JSON');
-      download.href = '/ui/jobs/' + job.jobId + '/result';
+      download.href = '/ui/batches/' + batch.batchId + '/result';
       actions.append(download);
+      if (batch.callback.status === 'not_sent' || batch.callback.status === 'failed') {
+        const label = batch.callback.status === 'failed' ? 'Reintentar envío' : 'Enviar a n8n';
+        actions.append(actionButton(label, (button) => sendBatch(batch.batchId, button), 'primary'));
+      }
     }
-    if (job.callback.status === 'failed') {
-      actions.append(actionButton('Reenviar a n8n', () => retryCallback(job.jobId), 'ghost'));
-    }
-
-    article.append(identity, state, actions);
+    top.append(identity, state, actions);
+    const classes = node('div', 'classes');
+    batch.jobs.forEach((job) => classes.append(renderClass(job, batch.batchId)));
+    article.append(top, classes);
     return article;
   }
 
-  async function loadJobs() {
+  async function loadBatches() {
     try {
-      const response = await fetch('/ui/jobs?limit=30', { cache: 'no-store' });
+      const response = await fetch('/ui/batches?limit=30', { cache: 'no-store' });
       if (!response.ok) throw new Error('No se pudo cargar el historial');
       const body = await response.json();
-      jobsContainer.replaceChildren();
-      if (!body.jobs.length) {
-        jobsContainer.append(node('p', 'empty', 'Aún no hay trabajos. Envía tu primera clase.'));
+      batchesContainer.replaceChildren();
+      if (!body.batches.length) {
+        batchesContainer.append(node('p', 'empty', 'Aún no hay lotes. Envía tu primera clase.'));
         return;
       }
-      body.jobs.forEach((job) => jobsContainer.append(renderJob(job)));
+      body.batches.forEach((batch) => batchesContainer.append(renderBatch(batch)));
     } catch (error) {
-      jobsContainer.replaceChildren(node('p', 'empty', error.message));
+      batchesContainer.replaceChildren(node('p', 'empty', error.message));
     }
   }
 
-  async function showResult(jobId) {
-    const response = await fetch('/ui/jobs/' + jobId, { cache: 'no-store' });
+  async function showResult(batchId) {
+    const response = await fetch('/ui/batches/' + batchId, { cache: 'no-store' });
     const body = await response.json();
-    if (!response.ok) return;
-    dialogTitle.textContent = body.request?.title || body.videoId;
-    resultJson.textContent = JSON.stringify(body.analysis, null, 2);
+    if (!response.ok) {
+      message.className = 'form-message error';
+      message.textContent = body.message || 'No se pudo abrir el resultado';
+      return;
+    }
+    dialogTitle.textContent = body.name;
+    resultJson.textContent = JSON.stringify(body.result, null, 2);
     dialog.showModal();
   }
 
-  async function retryCallback(jobId) {
-    const response = await fetch('/ui/jobs/' + jobId + '/retry-callback', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}'
-    });
-    if (!response.ok) {
+  async function sendBatch(batchId, button) {
+    button.disabled = true;
+    try {
+      const response = await fetch('/ui/batches/' + batchId + '/send', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}'
+      });
       const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'No se pudo enviar el lote');
+      message.className = 'form-message success';
+      message.textContent = 'El lote está en camino a n8n.';
+    } catch (error) {
       message.className = 'form-message error';
-      message.textContent = body.message || 'No se pudo reenviar el webhook';
+      message.textContent = error.message;
+    } finally {
+      await loadBatches();
     }
-    await loadJobs();
   }
 
-  document.querySelector('#add-video').addEventListener('click', () => addRow(true));
-  document.querySelector('#refresh-jobs').addEventListener('click', loadJobs);
+  async function retryClass(batchId, jobId, button) {
+    button.disabled = true;
+    try {
+      const response = await fetch('/ui/batches/' + batchId + '/jobs/' + jobId + '/retry', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}'
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'No se pudo reintentar la clase');
+      message.className = 'form-message success';
+      message.textContent = 'La clase volvió a la cola de procesamiento.';
+    } catch (error) {
+      message.className = 'form-message error';
+      message.textContent = error.message;
+    } finally {
+      await loadBatches();
+    }
+  }
+
+  document.querySelector('#add-video').addEventListener('click', () => {
+    if (rows.children.length < maximumBatchVideos) addRow(true);
+  });
+  document.querySelector('#refresh-batches').addEventListener('click', loadBatches);
   document.querySelector('#close-dialog').addEventListener('click', () => dialog.close());
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) dialog.close();
   });
 
+  batchName.value = defaultBatchName();
   addRow(false);
   loadCapabilities();
-  loadJobs();
-  window.setInterval(loadJobs, 4000);
+  loadBatches();
+  window.setInterval(loadBatches, 4000);
 })();`;

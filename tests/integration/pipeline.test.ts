@@ -24,6 +24,7 @@ class MemoryStore implements JobStore {
   job: PipelineJob = {
     id: '39f5a245-b69d-4b99-95e9-a0e43c5e9ef9',
     videoId: 'DEMOclass01',
+    batchId: null,
     requestPayload: {
       title: 'ETM English Class',
       classDate: '2026-07-16',
@@ -168,6 +169,42 @@ describe('mocked class pipeline', () => {
       `job-${store.job.id}-completed`,
     );
     await expect(access(join(root, store.job.id))).rejects.toThrow();
+  });
+
+  it('stores a batch class without sending an individual callback', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'etm-batch-pipeline-'));
+    const store = new MemoryStore();
+    store.job.batchId = '6db014a1-f5ab-47d0-82c3-84e514f5db3d';
+    const ports = makePorts();
+    const pipeline = new ClassPipeline(
+      store,
+      ports.youtube,
+      ports.media,
+      ports.ai,
+      ports.callback,
+      {
+        jobDataRoot: root,
+        chunkSeconds: 600,
+        overlapSeconds: 3,
+        visualAnalysisEnabled: true,
+        maximumFrames: 40,
+        maximumJsonCharacters: 95_000,
+      },
+      pino({ level: 'silent' }),
+    );
+
+    await pipeline.process(store.job.id, { attempt: 1, maximumAttempts: 4 });
+
+    expect(store.stages).toEqual([
+      'validating_video',
+      'downloading',
+      'extracting_audio',
+      'transcribing',
+      'synthesizing',
+      'completed',
+    ]);
+    expect(store.completedCallbackAttempts).toBe(0);
+    expect(ports.callback.send).not.toHaveBeenCalled();
   });
 
   it('preserves oversized output and adds an exact warning', async () => {

@@ -69,6 +69,8 @@ const envSchema = z
     ENABLE_VISUAL_ANALYSIS: booleanString,
     MAX_ANALYSIS_FRAMES: z.coerce.number().int().min(1).max(200).default(40),
     MAX_ANALYSIS_JSON_CHARACTERS: z.coerce.number().int().positive().default(95_000),
+    MAX_BATCH_VIDEOS: z.coerce.number().int().min(1).max(50).default(10),
+    MAX_BATCH_JSON_BYTES: z.coerce.number().int().positive().default(5_000_000),
     N8N_CALLBACK_URL: optionalUrl,
     N8N_CALLBACK_SECRET: z.string().default(''),
     CALLBACK_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(12).default(6),

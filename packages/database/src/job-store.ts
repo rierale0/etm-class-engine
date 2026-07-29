@@ -12,6 +12,7 @@ export class PrismaJobStore implements JobStore {
     return {
       id: job.id,
       videoId: job.videoId,
+      batchId: job.batchId,
       requestPayload: job.requestPayload,
     };
   }

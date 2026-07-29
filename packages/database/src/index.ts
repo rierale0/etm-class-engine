@@ -1,5 +1,5 @@
-import { Prisma, PrismaClient, type Job } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { Prisma, PrismaClient, type AnalysisBatch, type Job } from '@prisma/client';
+import { createHash, randomUUID } from 'node:crypto';
 import type { AnalyzeRequest, JobStatus } from '../../shared/src/index.js';
 
 export type DatabaseClient = PrismaClient;
@@ -38,6 +38,62 @@ export interface CreateJobInput {
 export interface CreatedJob {
   job: Job;
   created: boolean;
+}
+
+export interface CreateAnalysisBatchItem {
+  videoId: string;
+  payload: AnalyzeRequest;
+}
+
+export interface CreateAnalysisBatchInput {
+  name: string;
+  items: CreateAnalysisBatchItem[];
+}
+
+export interface CreatedAnalysisBatch {
+  batch: AnalysisBatch & { jobs: Job[] };
+}
+
+export async function createAnalysisBatch(
+  database: PrismaClient,
+  input: CreateAnalysisBatchInput,
+): Promise<CreatedAnalysisBatch> {
+  return database.$transaction(
+    async (transaction) => {
+      const videoIds = input.items.map((item) => item.videoId);
+      const active = await transaction.job.findFirst({
+        where: {
+          videoId: { in: videoIds },
+          status: { notIn: ['completed', 'failed'] },
+        },
+      });
+      if (active) throw new ActiveVideoJobError(active.id);
+
+      const batchId = randomUUID();
+      const batch = await transaction.analysisBatch.create({
+        data: {
+          id: batchId,
+          name: input.name,
+          jobs: {
+            create: input.items.map((item, position) => ({
+              id: randomUUID(),
+              videoId: item.videoId,
+              status: 'queued',
+              progress: 0,
+              requestPayload: item.payload,
+              idempotencyKey: `batch-${batchId}-${String(position)}-${item.videoId}`,
+              payloadHash: createHash('sha256').update(JSON.stringify(item.payload)).digest('hex'),
+              callbackStatus: 'disabled',
+              batchPosition: position,
+            })),
+          },
+        },
+        include: { jobs: { orderBy: { batchPosition: 'asc' } } },
+      });
+      return { batch };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
 }
 
 export async function createJobIdempotently(

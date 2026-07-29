@@ -26,8 +26,8 @@ OpenAI or Gemini, stores the result durably, and delivers it to n8n through a si
 
 ```mermaid
 flowchart LR
-    B["Local browser"] -->|"Form + status"| A["Fastify API"]
-    A -->|"Durable job"| P[("PostgreSQL")]
+    B["Local browser"] -->|"Batch form + status"| A["Fastify API"]
+    A -->|"Batch + durable jobs"| P[("PostgreSQL")]
     A -->|"Job ID"| Q[("Redis / BullMQ")]
     Q --> W["Worker"]
     W --> Y["YouTube + yt-dlp"]
@@ -35,7 +35,8 @@ flowchart LR
     W --> F["FFmpeg"]
     W --> O["OpenAI or Gemini"]
     W --> P
-    W -->|"Signed result callback"| N["n8n"]
+    B -->|"Manual send"| A
+    W -->|"One signed batch callback"| N["n8n"]
 ```
 
 The request returns immediately with `202 Accepted`. Processing continues asynchronously while
@@ -49,8 +50,9 @@ request
   → transcribe chronological chunks
   → optionally extract and analyze bounded visual evidence
   → synthesize and validate the final JSON
-  → store the complete result
-  → deliver a signed callback to n8n
+  → store each complete result without an individual callback
+  → assemble one deterministic batch JSON
+  → deliver it to n8n when the operator clicks Send
 ```
 
 See the detailed [architecture](docs/architecture.md), [API contract](docs/api.md),
@@ -59,9 +61,10 @@ See the detailed [architecture](docs/architecture.md), [API contract](docs/api.m
 ## Local application
 
 The default operating mode is a private application on the same computer that runs Docker
-Desktop. It accepts one or more YouTube links, class metadata, and a per-video visual-analysis
-choice. The dashboard tracks durable progress, displays completed JSON, and can retry only a
-failed n8n callback without repeating paid AI work.
+Desktop. Every form submission creates a batch containing one, two, or more YouTube links. Each
+class keeps its own metadata and visual-analysis choice, while the dashboard tracks individual and
+aggregate progress. Once every class completes, the application exposes one combined JSON and a
+manual **Send to n8n** action. A failed delivery can be retried without repeating paid AI work.
 
 ### Windows quick start
 
@@ -122,7 +125,8 @@ An anonymized response is available at
 - Worker attempts use exponential backoff and stalled-job recovery.
 - Temporary audio and frames are deleted in a `finally` block after success or failure.
 - Visual analysis is enabled only when both the server and the request opt in.
-- Frame count, dimensions, AI batches, media duration, disk use, and JSON size are bounded.
+- Frame count, dimensions, AI batches, media duration, disk use, per-class JSON size, batch count,
+  and combined JSON bytes are bounded.
 - A callback outage records a completed analysis with a failed delivery state; it never repeats
   transcription or analysis merely to retry the webhook.
 - Oversized results are preserved in full with an explicit warning and exact character count.

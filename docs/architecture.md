@@ -13,12 +13,12 @@ sequenceDiagram
     participant O as Selected AI provider
     participant N as n8n
 
-    B->>A: Same-origin form with YouTube URL
-    A->>A: Origin, URL, and body validation
-    A->>P: Serializable idempotent job insert
-    A->>Q: Enqueue durable job ID
-    A-->>B: 202 + job ID
-    B->>A: Poll job progress
+    B->>A: Same-origin batch with 1+ YouTube URLs
+    A->>A: Origin, URL, duplicate, and body validation
+    A->>P: Transactional batch + job inserts
+    A->>Q: Enqueue each durable job ID
+    A-->>B: 202 + batch/job IDs
+    B->>A: Poll batch and per-class progress
     Q->>W: Attempt with exponential retry
     W->>P: Stage/progress updates
     opt PO Token provider configured
@@ -32,10 +32,15 @@ sequenceDiagram
         W->>O: Bounded visible-evidence batches
     end
     W->>O: Strict structured class analysis
-    W->>P: Full JSON + exact character count
-    W->>N: Fixed, signed, idempotent callback
-    W->>P: Terminal/callback status
+    W->>P: Full class JSON + exact character count
+    W->>P: Complete class without individual callback
     W->>W: finally cleanup /data/jobs/{jobId}
+    B->>A: Send completed batch
+    A->>Q: Enqueue one batch callback
+    Q->>W: Batch callback task
+    W->>P: Read all ordered class JSONs
+    W->>N: One signed, idempotent combined JSON
+    W->>P: Batch delivery status + hash
 ```
 
 The worker routes transcription, visual analysis, and synthesis independently to OpenAI or Gemini.
@@ -61,9 +66,11 @@ for cancellation at safe boundaries (the current public status set has no cancel
 Non-final retryable attempts return the durable row to `queued`; terminal attempts store a
 sanitized failure and deliver a failure callback.
 
-A failed callback can be enqueued independently from the local dashboard. Callback redelivery
-reads the already stored terminal result and never invokes YouTube, FFmpeg, transcription, visual
-analysis, or synthesis again.
+A browser submission is always a batch, even with one video. Batch jobs never send individual
+callbacks. After every class is complete, a deterministic assembler preserves each class JSON
+under its video ID and adds explicit input order. The operator initiates the single batch callback
+from the dashboard. Callback redelivery reads the stored terminal results and never invokes
+YouTube, FFmpeg, transcription, visual analysis, or synthesis again.
 
 The partial unique PostgreSQL index `Job_one_active_video_key` prevents concurrent active jobs for
 one video, including races. A completed or failed video may be intentionally submitted again with
@@ -71,8 +78,9 @@ a new key; there is no administrative override endpoint.
 
 ## Data boundaries
 
-PostgreSQL stores request metadata, job/error/callback state, warnings, and final analysis. It never
-stores API secrets, YouTube cookies, or raw temporary media. Redis contains queue payloads with
-only the durable job UUID. `/data/jobs/{uuid}` is mode-restricted worker scratch space and is
+PostgreSQL stores batch metadata, ordered job relations, request metadata, job/error state,
+delivery state, warnings, and final class analyses. It never stores API secrets, YouTube cookies,
+or raw temporary media. Redis contains queue payloads with only a durable job or batch UUID.
+`/data/jobs/{uuid}` is mode-restricted worker scratch space and is
 removed in a `finally` block. The worker entrypoint initializes the mounted volume as root and
 immediately drops privileges with `gosu`; the Node process itself runs as `node`.

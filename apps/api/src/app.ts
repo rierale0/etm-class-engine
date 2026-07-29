@@ -4,7 +4,6 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest,
 } from 'fastify';
-import { randomUUID } from 'node:crypto';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import rawBody from 'fastify-raw-body';
@@ -13,6 +12,8 @@ import { csv, type AppConfig } from '../../../packages/config/src/index.js';
 import {
   ActiveVideoJobError,
   IdempotencyConflictError,
+  type CreateAnalysisBatchInput,
+  type CreatedAnalysisBatch,
   type CreatedJob,
   type CreateJobInput,
 } from '../../../packages/database/src/index.js';
@@ -24,6 +25,7 @@ import {
 } from '../../../packages/security/src/index.js';
 import {
   analyzeRequestSchema,
+  assembleBatchResult,
   videoIdSchema,
   youtubeVideoId,
 } from '../../../packages/shared/src/index.js';
@@ -35,7 +37,7 @@ export interface ApiJobView {
   status: string;
   progress: number;
   requestPayload: unknown;
-  resultJson: unknown;
+  resultJson?: unknown;
   resultCharacterCount: number | null;
   warnings: unknown;
   errorCode: string | null;
@@ -43,25 +45,48 @@ export interface ApiJobView {
   callbackStatus: string;
   callbackAttempts: number;
   callbackLastError: string | null;
+  batchId: string | null;
+  batchPosition: number | null;
   createdAt: Date;
   startedAt: Date | null;
   completedAt: Date | null;
   updatedAt: Date;
 }
 
-export type ApiJobSummary = Omit<ApiJobView, 'resultJson'>;
+export interface ApiBatchView {
+  id: string;
+  name: string;
+  callbackStatus: string;
+  callbackAttempts: number;
+  callbackLastError: string | null;
+  resultHash: string | null;
+  resultCharacterCount: number | null;
+  sentAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  jobs: ApiJobView[];
+}
 
 export interface ApiDependencies {
   createJob(input: CreateJobInput): Promise<CreatedJob>;
+  createBatch(input: CreateAnalysisBatchInput): Promise<CreatedAnalysisBatch>;
   enqueue(jobId: string): Promise<void>;
+  enqueueMany(jobIds: string[]): Promise<void>;
   getJob(jobId: string): Promise<ApiJobView | null>;
-  listJobs(limit: number): Promise<ApiJobSummary[]>;
-  enqueueCallbackRetry(jobId: string): Promise<void>;
+  getBatch(batchId: string): Promise<ApiBatchView | null>;
+  listBatches(limit: number): Promise<ApiBatchView[]>;
+  enqueueBatchSend(batchId: string): Promise<boolean>;
+  enqueueBatchJobRetry(batchId: string, jobId: string): Promise<boolean>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
 
 const jobIdParams = z.object({ jobId: z.string().uuid() });
+const batchIdParams = z.object({ batchId: z.string().uuid() });
+const batchJobParams = z.object({
+  batchId: z.string().uuid(),
+  jobId: z.string().uuid(),
+});
 const analyzeParams = z.object({ videoId: videoIdSchema });
 const localListQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) });
 const localAnalyzeRequestSchema = analyzeRequestSchema
@@ -79,6 +104,12 @@ const localAnalyzeRequestSchema = analyzeRequestSchema
           return false;
         }
       }, 'A valid YouTube video URL is required'),
+  })
+  .strict();
+const localBatchRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(300),
+    videos: z.array(localAnalyzeRequestSchema).min(1),
   })
   .strict();
 const idempotencySchema = z
@@ -192,77 +223,111 @@ export async function buildApp(
     );
     app.get('/ui/config', () => ({
       visualAnalysisEnabled: config.ENABLE_VISUAL_ANALYSIS,
+      maximumBatchVideos: config.MAX_BATCH_VIDEOS,
     }));
 
-    app.post('/ui/jobs', { preHandler: requireLocalOrigin }, async (request, reply) => {
-      const localRequest = localAnalyzeRequestSchema.parse(request.body);
-      if (localRequest.analyzeVisuals && !config.ENABLE_VISUAL_ANALYSIS) {
+    app.post('/ui/batches', { preHandler: requireLocalOrigin }, async (request, reply) => {
+      const localRequest = localBatchRequestSchema.parse(request.body);
+      if (localRequest.videos.length > config.MAX_BATCH_VIDEOS) {
+        return reply.code(400).send({
+          message: `A batch can contain at most ${String(config.MAX_BATCH_VIDEOS)} videos`,
+        });
+      }
+      if (
+        localRequest.videos.some((video) => video.analyzeVisuals) &&
+        !config.ENABLE_VISUAL_ANALYSIS
+      ) {
         return reply.code(409).send({
           message: 'Visual analysis is disabled in the application configuration',
         });
       }
-      const videoId = youtubeVideoId(localRequest.videoUrl);
-      const payload = analyzeRequestSchema.parse({
-        title: localRequest.title,
-        classDate: localRequest.classDate,
-        teacher: localRequest.teacher,
-        course: localRequest.course,
-        analyzeVisuals: localRequest.analyzeVisuals,
-      });
-      const raw = Buffer.from(JSON.stringify(localRequest));
-      const result = await dependencies.createJob({
-        videoId,
-        payload,
-        idempotencyKey: `ui-${videoId}-${randomUUID()}`,
-        payloadHash: requestPayloadHash('POST', '/ui/jobs', raw),
-      });
-      if (result.created) await dependencies.enqueue(result.job.id);
-      return reply.code(202).send({
-        jobId: result.job.id,
-        videoId,
-        status: result.job.status,
-      });
-    });
-
-    app.get('/ui/jobs', async (request) => {
-      const { limit } = localListQuery.parse(request.query);
-      const jobs = await dependencies.listJobs(limit);
-      return { jobs: jobs.map((job) => localJobView(job, false)) };
-    });
-
-    app.get('/ui/jobs/:jobId', async (request, reply) => {
-      const { jobId } = jobIdParams.parse(request.params);
-      const job = await dependencies.getJob(jobId);
-      if (!job) return reply.code(404).send({ message: 'Job not found' });
-      return localJobView(job, true);
-    });
-
-    app.get('/ui/jobs/:jobId/result', async (request, reply) => {
-      const { jobId } = jobIdParams.parse(request.params);
-      const job = await dependencies.getJob(jobId);
-      if (!job) return reply.code(404).send({ message: 'Job not found' });
-      if (job.status !== 'completed' || job.resultJson === null) {
-        return reply.code(409).send({ message: 'The result is not available yet' });
+      const items = localRequest.videos.map((video) => ({
+        videoId: youtubeVideoId(video.videoUrl),
+        payload: analyzeRequestSchema.parse({
+          title: video.title,
+          classDate: video.classDate,
+          teacher: video.teacher,
+          course: video.course,
+          analyzeVisuals: video.analyzeVisuals,
+        }),
+      }));
+      if (new Set(items.map((item) => item.videoId)).size !== items.length) {
+        return reply.code(400).send({ message: 'A batch cannot contain duplicate videos' });
       }
+      const result = await dependencies.createBatch({
+        name: localRequest.name,
+        items,
+      });
+      await dependencies.enqueueMany(result.batch.jobs.map((job) => job.id));
+      return reply.code(202).send({
+        batchId: result.batch.id,
+        status: 'processing',
+        jobIds: result.batch.jobs.map((job) => job.id),
+      });
+    });
+
+    app.get('/ui/batches', async (request) => {
+      const { limit } = localListQuery.parse(request.query);
+      const batches = await dependencies.listBatches(limit);
+      return { batches: batches.map((batch) => localBatchView(batch, false)) };
+    });
+
+    app.get('/ui/batches/:batchId', async (request, reply) => {
+      const { batchId } = batchIdParams.parse(request.params);
+      const batch = await dependencies.getBatch(batchId);
+      if (!batch) return reply.code(404).send({ message: 'Batch not found' });
+      const view = localBatchView(batch, true);
+      if (view.result) assertBatchSize(view.result, config.MAX_BATCH_JSON_BYTES);
+      return view;
+    });
+
+    app.get('/ui/batches/:batchId/result', async (request, reply) => {
+      const { batchId } = batchIdParams.parse(request.params);
+      const batch = await dependencies.getBatch(batchId);
+      if (!batch) return reply.code(404).send({ message: 'Batch not found' });
+      if (batchStatus(batch.jobs) !== 'ready') {
+        return reply.code(409).send({ message: 'The batch result is not available yet' });
+      }
+      const result = assembleBatchResult(batch);
+      assertBatchSize(result, config.MAX_BATCH_JSON_BYTES);
       return reply
         .header('cache-control', 'no-store')
-        .header('content-disposition', `attachment; filename="etm-analysis-${job.videoId}.json"`)
+        .header('content-disposition', `attachment; filename="etm-batch-${batch.id}.json"`)
         .type('application/json; charset=utf-8')
-        .send(job.resultJson);
+        .send(result);
     });
 
     app.post(
-      '/ui/jobs/:jobId/retry-callback',
+      '/ui/batches/:batchId/send',
       { preHandler: requireLocalOrigin },
       async (request, reply) => {
-        const { jobId } = jobIdParams.parse(request.params);
-        const job = await dependencies.getJob(jobId);
-        if (!job) return reply.code(404).send({ message: 'Job not found' });
-        if (!['completed', 'failed'].includes(job.status) || job.callbackStatus !== 'failed') {
-          return reply.code(409).send({ message: 'This callback cannot be retried' });
+        const { batchId } = batchIdParams.parse(request.params);
+        const batch = await dependencies.getBatch(batchId);
+        if (!batch) return reply.code(404).send({ message: 'Batch not found' });
+        if (batchStatus(batch.jobs) !== 'ready') {
+          return reply.code(409).send({ message: 'Every class must complete before sending' });
         }
-        await dependencies.enqueueCallbackRetry(jobId);
-        return reply.code(202).send({ jobId, callbackStatus: 'pending' });
+        const result = assembleBatchResult(batch);
+        assertBatchSize(result, config.MAX_BATCH_JSON_BYTES);
+        if (!['not_sent', 'failed'].includes(batch.callbackStatus)) {
+          return reply.code(409).send({ message: 'This batch is already sending or sent' });
+        }
+        if (!(await dependencies.enqueueBatchSend(batchId))) {
+          return reply.code(409).send({ message: 'This batch is already sending or sent' });
+        }
+        return reply.code(202).send({ batchId, callbackStatus: 'pending' });
+      },
+    );
+
+    app.post(
+      '/ui/batches/:batchId/jobs/:jobId/retry',
+      { preHandler: requireLocalOrigin },
+      async (request, reply) => {
+        const { batchId, jobId } = batchJobParams.parse(request.params);
+        if (!(await dependencies.enqueueBatchJobRetry(batchId, jobId))) {
+          return reply.code(409).send({ message: 'Only a failed class can be retried' });
+        }
+        return reply.code(202).send({ batchId, jobId, status: 'queued' });
       },
     );
   }
@@ -353,6 +418,16 @@ export async function buildApp(
       });
       return;
     }
+    if (error instanceof BatchResultTooLargeError) {
+      void reply.code(413).send({
+        statusCode: 413,
+        error: 'Payload Too Large',
+        message: error.message,
+        bytes: error.bytes,
+        maximumBytes: error.maximumBytes,
+      });
+      return;
+    }
     app.log.error({ err: error }, 'Unhandled API error');
     void reply.code(500).send({
       statusCode: 500,
@@ -380,7 +455,7 @@ export async function buildApp(
   return app;
 }
 
-function localJobView(job: ApiJobSummary | ApiJobView, includeAnalysis: boolean): object {
+function localJobView(job: ApiJobView, includeAnalysis: boolean): object {
   const request = analyzeRequestSchema.safeParse(job.requestPayload);
   const withResult = job as Partial<ApiJobView>;
   return {
@@ -412,6 +487,70 @@ function localJobView(job: ApiJobSummary | ApiJobView, includeAnalysis: boolean)
     analysis:
       includeAnalysis && job.status === 'completed' ? (withResult.resultJson ?? null) : null,
   };
+}
+
+function batchStatus(jobs: ApiJobView[]): 'processing' | 'ready' | 'attention_required' {
+  if (jobs.length > 0 && jobs.every((job) => job.status === 'completed')) return 'ready';
+  if (jobs.some((job) => job.status === 'failed')) return 'attention_required';
+  return 'processing';
+}
+
+function localBatchView(
+  batch: ApiBatchView,
+  includeResult: boolean,
+): {
+  batchId: string;
+  name: string;
+  status: 'processing' | 'ready' | 'attention_required';
+  progress: number;
+  completedClasses: number;
+  totalClasses: number;
+  callback: { status: string; attempts: number; lastError: string | null; sentAt: Date | null };
+  timestamps: { createdAt: Date; updatedAt: Date };
+  resultAvailable: boolean;
+  jobs: object[];
+  result: ReturnType<typeof assembleBatchResult> | null;
+} {
+  const status = batchStatus(batch.jobs);
+  const progress =
+    batch.jobs.length === 0
+      ? 0
+      : Math.round(batch.jobs.reduce((total, job) => total + job.progress, 0) / batch.jobs.length);
+  return {
+    batchId: batch.id,
+    name: batch.name,
+    status,
+    progress,
+    completedClasses: batch.jobs.filter((job) => job.status === 'completed').length,
+    totalClasses: batch.jobs.length,
+    callback: {
+      status: batch.callbackStatus,
+      attempts: batch.callbackAttempts,
+      lastError: batch.callbackLastError,
+      sentAt: batch.sentAt,
+    },
+    timestamps: { createdAt: batch.createdAt, updatedAt: batch.updatedAt },
+    resultAvailable: status === 'ready',
+    jobs: batch.jobs.map((job) => localJobView(job, false)),
+    result: includeResult && status === 'ready' ? assembleBatchResult(batch) : null,
+  };
+}
+
+function assertBatchSize(result: unknown, maximumBytes: number): void {
+  const bytes = Buffer.byteLength(JSON.stringify(result), 'utf8');
+  if (bytes > maximumBytes) {
+    throw new BatchResultTooLargeError(bytes, maximumBytes);
+  }
+}
+
+class BatchResultTooLargeError extends Error {
+  constructor(
+    public readonly bytes: number,
+    public readonly maximumBytes: number,
+  ) {
+    super('The combined batch JSON exceeds the configured size limit');
+    this.name = 'BatchResultTooLargeError';
+  }
 }
 
 function header(request: FastifyRequest, name: string): string | undefined {

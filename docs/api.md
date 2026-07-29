@@ -7,20 +7,27 @@ These routes exist only when `LOCAL_UI_ENABLED=true`, which is set by
 `http://localhost:8080`; mutating requests require the configured same-origin header.
 
 ```text
-POST /ui/jobs
 GET  /ui/config
-GET  /ui/jobs
-GET  /ui/jobs/{jobId}
-GET  /ui/jobs/{jobId}/result
-POST /ui/jobs/{jobId}/retry-callback
+POST /ui/batches
+GET  /ui/batches
+GET  /ui/batches/{batchId}
+GET  /ui/batches/{batchId}/result
+POST /ui/batches/{batchId}/send
+POST /ui/batches/{batchId}/jobs/{jobId}/retry
 ```
 
-`POST /ui/jobs` accepts `videoUrl`, `title`, `classDate`, `teacher`, `course`, and
-`analyzeVisuals`. The server accepts supported YouTube URL forms, extracts the fixed eleven
-character ID, generates idempotency internally, and queues one durable job. Callback retry is
-available only for terminal jobs with a failed callback and never requeues media or AI work.
+`POST /ui/batches` accepts a batch `name` and a `videos` array containing `videoUrl`, `title`,
+`classDate`, `teacher`, `course`, and `analyzeVisuals`. The array accepts one through
+`MAX_BATCH_VIDEOS` entries. Creation is transactional, duplicate video IDs are rejected, and every
+class becomes an independently retried durable job.
+
+The combined result is available only after all classes complete. `POST .../send` claims the
+delivery atomically and queues one signed n8n callback. Repeating or retrying that action never
+requeues YouTube, media, or AI work.
+If a class exhausts its automatic attempts, its scoped retry endpoint requeues only that failed
+class and preserves every successful class in the batch.
 `GET /ui/config` exposes only non-secret UI capabilities, such as whether visual analysis is
-enabled.
+enabled and the maximum batch size.
 
 ## HMAC authentication
 
