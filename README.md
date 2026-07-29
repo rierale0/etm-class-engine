@@ -15,8 +15,8 @@ OpenAI or Gemini, stores the result durably, and delivers it to n8n through a si
 - A durable asynchronous pipeline built with BullMQ, Redis, PostgreSQL, and Prisma.
 - Provider routing between OpenAI and Gemini for transcription, synthesis, and optional visual
   analysis.
-- Media processing with `yt-dlp` and FFmpeg, bounded frame extraction, transcript overlap
-  deduplication, and deterministic cleanup.
+- Media processing with `yt-dlp`, an automatic PO Token provider, and FFmpeg, plus bounded frame
+  extraction, transcript overlap deduplication, and deterministic cleanup.
 - Strict Zod/JSON Schema validation before results are stored or delivered.
 - Signed, retried, idempotent webhook delivery to n8n without rerunning paid AI work when the
   callback is unavailable.
@@ -32,6 +32,7 @@ flowchart LR
     A -->|"Job ID"| Q[("Redis / BullMQ")]
     Q --> W["Worker"]
     W --> Y["YouTube + yt-dlp"]
+    W --> T["Internal PO Token provider"]
     W --> F["FFmpeg"]
     W --> O["OpenAI or Gemini"]
     W --> P
@@ -140,6 +141,21 @@ curl http://localhost:8080/ready
 
 Only Caddy publishes host ports. PostgreSQL and Redis stay on internal Docker networks.
 
+## YouTube PO Tokens
+
+The Compose stack starts a private `bgutil` sidecar and installs its matching yt-dlp plugin in the
+worker. The worker uses the recommended `mweb` client and obtains video-bound Proof-of-Origin
+tokens automatically. Port `4416` is exposed only inside Docker; it is never published on the
+host.
+
+```dotenv
+YOUTUBE_PO_TOKEN_PROVIDER_URL=http://pot-provider:4416
+```
+
+An empty value disables PO Token arguments. The Netscape cookie secret remains an optional
+fallback for content that genuinely requires an account, such as age-restricted or private media;
+ordinary authorized Unlisted videos do not require stored Google credentials.
+
 ## AI provider configuration
 
 Use one provider for every stage:
@@ -172,7 +188,8 @@ incompatible combinations. OpenAI transcription uses `whisper-1` because this pi
 - YouTube content must match an explicit channel allowlist.
 - The worker invokes media tools without a shell and processes files in a restricted job
   directory.
-- Containers run without unnecessary public ports; the worker drops to an unprivileged user.
+- Containers run without unnecessary public ports; the worker drops to an unprivileged user, and
+  the PO Token sidecar is read-only, capability-free, and reachable only through Docker.
 
 Please report security issues privately according to [SECURITY.md](SECURITY.md).
 

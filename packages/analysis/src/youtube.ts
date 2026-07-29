@@ -23,6 +23,7 @@ export type YoutubeMetadata = z.infer<typeof metadataSchema>;
 
 export interface YoutubeOptions {
   cookiesPath: string;
+  poTokenProviderUrl?: string;
   metadataTimeoutMs: number;
   downloadTimeoutMs: number;
   maxDurationSeconds: number;
@@ -33,7 +34,22 @@ export function youtubeUrl(videoId: string): string {
   return `https://www.youtube.com/watch?v=${videoIdSchema.parse(videoId)}`;
 }
 
-export function metadataArgs(videoId: string, cookiesAvailable: boolean): string[] {
+export function poTokenArgs(providerUrl?: string): string[] {
+  const normalizedUrl = providerUrl?.trim().replace(/\/+$/, '');
+  if (!normalizedUrl) return [];
+  return [
+    '--extractor-args',
+    'youtube:player_client=mweb',
+    '--extractor-args',
+    `youtubepot-bgutilhttp:base_url=${normalizedUrl}`,
+  ];
+}
+
+export function metadataArgs(
+  videoId: string,
+  cookiesAvailable: boolean,
+  poTokenProviderUrl?: string,
+): string[] {
   return [
     '--no-playlist',
     '--skip-download',
@@ -41,6 +57,7 @@ export function metadataArgs(videoId: string, cookiesAvailable: boolean): string
     '--no-warnings',
     '--js-runtimes',
     'node',
+    ...poTokenArgs(poTokenProviderUrl),
     ...(cookiesAvailable ? ['--cookies', '/run/secrets/youtube_cookies'] : []),
     '--',
     youtubeUrl(videoId),
@@ -52,6 +69,7 @@ export function downloadArgs(input: {
   outputTemplate: string;
   includeVideo: boolean;
   cookiesPath?: string;
+  poTokenProviderUrl?: string;
 }): string[] {
   const format = input.includeVideo
     ? 'bv*[height<=1080]+ba/b[height<=1080]/best'
@@ -62,6 +80,7 @@ export function downloadArgs(input: {
     '--newline',
     '--js-runtimes',
     'node',
+    ...poTokenArgs(input.poTokenProviderUrl),
     '--format',
     format,
     '--output',
@@ -115,7 +134,7 @@ export class YoutubeClient {
 
   async getMetadata(videoId: string): Promise<YoutubeMetadata> {
     const hasCookies = await cookiesAvailable(this.options.cookiesPath);
-    const args = metadataArgs(videoId, hasCookies).map((value) =>
+    const args = metadataArgs(videoId, hasCookies, this.options.poTokenProviderUrl).map((value) =>
       value === '/run/secrets/youtube_cookies' ? this.options.cookiesPath : value,
     );
     try {
@@ -141,6 +160,9 @@ export class YoutubeClient {
       videoId,
       outputTemplate,
       includeVideo,
+      ...(this.options.poTokenProviderUrl
+        ? { poTokenProviderUrl: this.options.poTokenProviderUrl }
+        : {}),
       ...(hasCookies ? { cookiesPath: this.options.cookiesPath } : {}),
     });
     try {
