@@ -8,28 +8,49 @@ datasource db {
 }
 
 model Job {
-  id                   String   @id @db.Uuid
+  id                   String         @id @db.Uuid
   videoId              String
   status               String
-  progress             Int      @default(0)
+  progress             Int            @default(0)
   requestPayload       Json
   resultJson           Json?
   resultCharacterCount Int?
   warnings             Json?
   errorCode            String?
   errorMessage         String?
-  attemptCount         Int      @default(0)
-  idempotencyKey       String   @unique
+  attemptCount         Int            @default(0)
+  idempotencyKey       String         @unique
   payloadHash          String
-  callbackStatus       String   @default("pending")
-  callbackAttempts     Int      @default(0)
+  callbackStatus       String         @default("pending")
+  callbackAttempts     Int            @default(0)
   callbackLastError    String?
   cancelRequestedAt    DateTime?
-  createdAt            DateTime @default(now())
+  batchId              String?        @db.Uuid
+  batchPosition        Int?
+  createdAt            DateTime       @default(now())
   startedAt            DateTime?
   completedAt          DateTime?
-  updatedAt            DateTime @updatedAt
+  updatedAt            DateTime       @updatedAt
+  batch                AnalysisBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
+  @@unique([batchId, videoId])
   @@index([videoId])
   @@index([status, updatedAt])
+  @@index([batchId, batchPosition])
+}
+
+model AnalysisBatch {
+  id                   String    @id @db.Uuid
+  name                 String
+  callbackStatus       String    @default("not_sent")
+  callbackAttempts     Int       @default(0)
+  callbackLastError    String?
+  resultHash           String?
+  resultCharacterCount Int?
+  sentAt               DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  jobs                 Job[]
+
+  @@index([createdAt])
 }

@@ -1,6 +1,6 @@
 # ETM Class Engine
 
-Production-oriented, self-hosted engine that turns authorized English-class recordings into
+Local-first, self-hosted engine that turns authorized English-class recordings into
 structured pedagogical analysis. It downloads an approved YouTube video, reconstructs a
 timestamped transcript, optionally inspects selected frames, generates schema-validated JSON with
 OpenAI or Gemini, stores the result durably, and delivers it to n8n through a signed webhook.
@@ -10,8 +10,8 @@ OpenAI or Gemini, stores the result durably, and delivers it to n8n through a si
 
 ## What this project demonstrates
 
-- A secure HMAC-authenticated API with CIDR allowlisting, replay protection, rate limiting, and
-  idempotent requests.
+- A browser-based local submission and monitoring interface that never exposes AI secrets.
+- A secure HMAC-authenticated API for optional service-to-service automation.
 - A durable asynchronous pipeline built with BullMQ, Redis, PostgreSQL, and Prisma.
 - Provider routing between OpenAI and Gemini for transcription, synthesis, and optional visual
   analysis.
@@ -20,15 +20,14 @@ OpenAI or Gemini, stores the result durably, and delivers it to n8n through a si
 - Strict Zod/JSON Schema validation before results are stored or delivered.
 - Signed, retried, idempotent webhook delivery to n8n without rerunning paid AI work when the
   callback is unavailable.
-- A least-privilege Docker topology with Caddy as the only public service.
+- A local Docker Desktop topology bound only to loopback, with an optional Caddy edge deployment.
 
 ## System design
 
 ```mermaid
 flowchart LR
-    N["n8n or authorized client"] -->|"Signed request"| C["Caddy / HTTPS"]
-    C --> A["Fastify API"]
-    A -->|"Durable job"| P[("PostgreSQL")]
+    B["Local browser"] -->|"Batch form + status"| A["Fastify API"]
+    A -->|"Batch + durable jobs"| P[("PostgreSQL")]
     A -->|"Job ID"| Q[("Redis / BullMQ")]
     Q --> W["Worker"]
     W --> Y["YouTube + yt-dlp"]
@@ -36,7 +35,8 @@ flowchart LR
     W --> F["FFmpeg"]
     W --> O["OpenAI or Gemini"]
     W --> P
-    W -->|"Signed result callback"| N
+    B -->|"Manual send"| A
+    W -->|"One signed batch callback"| N["n8n"]
 ```
 
 The request returns immediately with `202 Accepted`. Processing continues asynchronously while
@@ -44,20 +44,57 @@ PostgreSQL remains the source of truth for job state and final output.
 
 ```text
 request
-  → validate source, HMAC, timestamp, body, and idempotency
+  → validate local origin/URL or service HMAC, body, and idempotency
   → inspect authorized YouTube metadata
   → download and normalize audio
   → transcribe chronological chunks
   → optionally extract and analyze bounded visual evidence
   → synthesize and validate the final JSON
-  → store the complete result
-  → deliver a signed callback to n8n
+  → store each complete result without an individual callback
+  → assemble one deterministic batch JSON
+  → deliver it to n8n when the operator clicks Send
 ```
 
 See the detailed [architecture](docs/architecture.md), [API contract](docs/api.md),
 [security model](docs/security.md), and [n8n integration](docs/n8n-integration.md).
 
-## Example input
+## Local application
+
+The default operating mode is a private application on the same computer that runs Docker
+Desktop. Every form submission creates a batch containing one, two, or more YouTube links. Each
+class keeps its own metadata and visual-analysis choice, while the dashboard tracks individual and
+aggregate progress. Once every class completes, the application exposes one combined JSON and a
+manual **Send to n8n** action. A failed delivery can be retried without repeating paid AI work.
+
+### Windows quick start
+
+1. Copy `.env.example` to `.env` and set the AI key, database/API secrets, callback secret, and
+   `N8N_CALLBACK_URL`.
+2. Start Docker Desktop.
+3. Run:
+
+```powershell
+.\scripts\start-local.ps1
+```
+
+The script creates the optional empty cookie secret, builds the stack, waits for readiness, and
+opens [http://localhost:8080](http://localhost:8080). The port is bound to `127.0.0.1`; it is not
+available to the LAN or Internet.
+
+Before spending AI credits, verify YouTube access through the local connection:
+
+```powershell
+.\scripts\test-youtube-local.ps1 `
+  -VideoUrl "https://www.youtube.com/watch?v=U_t4DLT7eVQ"
+```
+
+Stop the application without deleting PostgreSQL, Redis, or result volumes:
+
+```powershell
+.\scripts\stop-local.ps1
+```
+
+## Service API example
 
 ```http
 POST /v1/classes/DEMOclass01/analyze
@@ -67,6 +104,7 @@ Idempotency-Key: portfolio-demo-001
 Content-Type: application/json
 
 {
+  "title": "ETM English Class",
   "teacher": "Alex Morgan",
   "classDate": "2026-07-16",
   "course": "English Workshop",
@@ -87,7 +125,8 @@ An anonymized response is available at
 - Worker attempts use exponential backoff and stalled-job recovery.
 - Temporary audio and frames are deleted in a `finally` block after success or failure.
 - Visual analysis is enabled only when both the server and the request opt in.
-- Frame count, dimensions, AI batches, media duration, disk use, and JSON size are bounded.
+- Frame count, dimensions, AI batches, media duration, disk use, per-class JSON size, batch count,
+  and combined JSON bytes are bounded.
 - A callback outage records a completed analysis with a failed delivery state; it never repeats
   transcription or analysis merely to retry the webhook.
 - Oversized results are preserved in full with an explicit warning and exact character count.
@@ -101,7 +140,8 @@ An anonymized response is available at
 | Durable storage    | PostgreSQL, Prisma       |
 | Media pipeline     | yt-dlp, FFmpeg           |
 | AI providers       | OpenAI, Gemini           |
-| Edge and TLS       | Caddy                    |
+| Local interface    | Native HTML/CSS/JS       |
+| Optional edge/TLS  | Caddy                    |
 | Deployment         | Docker Compose           |
 | Automation output  | Signed n8n webhook       |
 | Quality            | Vitest, ESLint, Prettier |
@@ -125,28 +165,24 @@ npm run lint
 npm run format:check
 ```
 
-For the complete local stack:
+For the complete local stack without the PowerShell helper:
 
-```bash
-cp .env.example .env
-mkdir -p secrets
-install -m 600 /dev/null secrets/youtube_cookies
-# Set local secrets and an authorized test channel in .env.
-docker compose config
-docker compose up -d --build
-docker compose ps
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.local.yml config
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml ps
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
 ```
 
-Only Caddy publishes host ports. PostgreSQL and Redis stay on internal Docker networks.
+Only the Fastify application is published, exclusively on host loopback. PostgreSQL and Redis stay
+on internal Docker networks. Caddy is disabled in this mode.
 
 ## YouTube PO Tokens
 
-The Compose stack starts a private `bgutil` sidecar and installs its matching yt-dlp plugin in the
-worker. The worker uses the recommended `mweb` client and obtains video-bound Proof-of-Origin
-tokens automatically. Port `4416` is exposed only inside Docker; it is never published on the
-host.
+The Compose stack includes a private `bgutil` sidecar and installs its matching yt-dlp plugin in
+the worker. PO Tokens are optional in local mode because a normal home/office IP often does not
+need them. Set the internal provider URL only when useful:
 
 ```dotenv
 YOUTUBE_PO_TOKEN_PROVIDER_URL=http://pot-provider:4416

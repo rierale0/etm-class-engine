@@ -1,5 +1,14 @@
 # Security
 
+## Local browser mode
+
+`docker-compose.local.yml` publishes Fastify only on `127.0.0.1`. Local write routes require an
+exact `Origin` matching `LOCAL_UI_ORIGIN`, accept JSON only, and validate YouTube hosts and video
+IDs before queueing work. Batch creation rejects duplicate videos and bounds both video count and
+combined JSON bytes. The browser never receives `ETM_API_SECRET`, AI keys, callback secrets,
+database credentials, or cookie contents. Do not change the binding to `0.0.0.0` without adding
+real user authentication and HTTPS.
+
 HMAC is mandatory even for an allowed IP. Verification hashes the exact raw body, applies a
 five-minute replay window, validates fixed-length hex, and uses `crypto.timingSafeEqual`. The API
 logs neither signatures nor secrets. Caddy access logging deletes HMAC, timestamp, cookie,

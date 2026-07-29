@@ -1,5 +1,10 @@
 # n8n integration
 
+The local browser form is the primary input. Every submission is one batch containing one or more
+classes. After all classes complete, the operator clicks **Send to n8n** and n8n receives one
+combined, signed JSON. n8n does not need inbound access to the computer running ETM Class Engine.
+The service-to-service request below remains supported for optional single-class automation.
+
 ## Sending the analysis request
 
 In an n8n Code node, build the raw JSON once. Do not let a later node reserialize it differently
@@ -53,29 +58,53 @@ timestamp + "\n" + SHA256(rawCallbackBody)
 Verify the timestamp is within 300 seconds and compare the expected 64-character hex HMAC with a
 timing-safe comparison before parsing/using the body. See `scripts/verify-callback.ts`.
 
-Completed payload:
+The local batch callback body is the combined result itself:
 
 ```json
 {
-  "jobId": "uuid",
-  "videoId": "DEMOclass01",
-  "status": "completed",
-  "analysis": {},
-  "analysisCharacterCount": 48231,
-  "error": null
+  "schema_version": 1,
+  "batch": {
+    "id": "batch-uuid",
+    "name": "English Usage — 30 de julio de 2026",
+    "status": "ready",
+    "class_count": 2,
+    "created_at": "2026-07-30T18:00:00.000Z",
+    "completed_at": "2026-07-30T20:00:00.000Z"
+  },
+  "order": ["VIDEO000001", "VIDEO000002"],
+  "classes": {
+    "VIDEO000001": {
+      "job_id": "job-uuid-1",
+      "video_url": "https://www.youtube.com/watch?v=VIDEO000001",
+      "submission": {
+        "title": "ETM English Class",
+        "class_date": "2026-07-30",
+        "teacher": "Sebastián Mesías",
+        "course": "English Usage",
+        "analyze_visuals": true
+      },
+      "analysis": {}
+    },
+    "VIDEO000002": {
+      "job_id": "job-uuid-2",
+      "video_url": "https://www.youtube.com/watch?v=VIDEO000002",
+      "submission": {},
+      "analysis": {}
+    }
+  }
 }
 ```
 
-Failed payload has `analysis: null` and a sanitized `{code,message}` error. Deduplicate callbacks
-by `Idempotency-Key`; return a 2xx for already processed callbacks. Return 408 or 429 only when a
-retry is genuinely useful. Other 4xx responses are permanent; 5xx responses retry with
-exponential backoff and jitter.
+The `classes` object preserves every validated class analysis without asking AI to combine or
+rewrite it. `order` carries the explicit form order. The stable idempotency key is
+`batch-{batchId}-completed`; deduplicate callbacks by that header and return a 2xx for an already
+processed batch. Return 408 or 429 only when a retry is genuinely useful. Other 4xx responses are
+permanent; 5xx responses retry with exponential backoff and jitter.
 
-If delivery of a completed result exhausts all callback attempts, the analysis remains durably
-stored with job status `completed` and callback status `failed`. Callback outages never rerun the
-paid media or AI pipeline; operators can retrieve the result from the job status API and replay
-delivery separately.
+If delivery exhausts all callback attempts, every class analysis remains durably stored and the
+batch delivery status becomes `failed`. The dashboard offers **Retry send**. Callback outages never
+rerun the paid media or AI pipeline.
 
-Before inserting into Airtable, compare `analysisCharacterCount` to 95,000 and inspect
-`ANALYSIS_OVERSIZE`. The complete result remains in PostgreSQL/status API; do not slice its
-transcript to force insertion.
+The existing signed `/v1/classes/{videoId}/analyze` API still sends its legacy single-job callback
+for compatibility. That payload uses `jobId`, `videoId`, `status`, `analysis`, and
+`analysisCharacterCount`.

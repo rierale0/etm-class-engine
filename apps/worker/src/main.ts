@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { Queue, UnrecoverableError, Worker } from 'bullmq';
 import { pino } from 'pino';
 import { AiRouter } from '../../../packages/analysis/src/ai-router.js';
@@ -17,7 +18,7 @@ import {
 } from '../../../packages/config/src/index.js';
 import { createDatabase } from '../../../packages/database/src/index.js';
 import { PrismaJobStore } from '../../../packages/database/src/job-store.js';
-import { queueName } from '../../../packages/shared/src/index.js';
+import { assembleBatchResult, queueName } from '../../../packages/shared/src/index.js';
 
 const config = loadConfig();
 const logger = pino({
@@ -37,7 +38,12 @@ const connection = {
   ...(redisUrl.username ? { username: decodeURIComponent(redisUrl.username) } : {}),
   ...(redisUrl.protocol === 'rediss:' ? { tls: {} } : {}),
 };
-const queue = new Queue<{ jobId: string }>(queueName, { connection });
+interface QueuePayload {
+  jobId?: string;
+  batchId?: string;
+}
+
+const queue = new Queue<QueuePayload>(queueName, { connection });
 
 await mkdir(config.JOB_DATA_ROOT, { recursive: true, mode: 0o700 });
 
@@ -82,6 +88,12 @@ logger.info(
   'AI providers configured',
 );
 
+const callbackSender = new CallbackSender(
+  config.N8N_CALLBACK_URL,
+  config.N8N_CALLBACK_SECRET,
+  config.CALLBACK_MAX_ATTEMPTS,
+);
+
 const pipeline = new ClassPipeline(
   store,
   new YoutubeClient({
@@ -94,11 +106,7 @@ const pipeline = new ClassPipeline(
   }),
   new MediaProcessor(config.FFMPEG_TIMEOUT_MS, config.MIN_FREE_DISK_BYTES),
   ai,
-  new CallbackSender(
-    config.N8N_CALLBACK_URL,
-    config.N8N_CALLBACK_SECRET,
-    config.CALLBACK_MAX_ATTEMPTS,
-  ),
+  callbackSender,
   {
     jobDataRoot: config.JOB_DATA_ROOT,
     chunkSeconds: config.AUDIO_CHUNK_SECONDS,
@@ -110,9 +118,20 @@ const pipeline = new ClassPipeline(
   logger,
 );
 
-const worker = new Worker<{ jobId: string }>(
+const worker = new Worker<QueuePayload>(
   queueName,
   async (bullJob) => {
+    if (bullJob.name === 'send-batch-callback') {
+      if (!bullJob.data.batchId) throw new UnrecoverableError('Batch callback job is invalid');
+      await sendBatchCallback(bullJob.data.batchId);
+      return;
+    }
+    if (bullJob.name === 'retry-callback') {
+      if (!bullJob.data.jobId) throw new UnrecoverableError('Callback retry job is invalid');
+      await resendCallback(bullJob.data.jobId);
+      return;
+    }
+    if (!bullJob.data.jobId) throw new UnrecoverableError('Analysis job is invalid');
     const attempt = bullJob.attemptsMade + 1;
     try {
       await pipeline.process(bullJob.data.jobId, {
@@ -135,12 +154,95 @@ const worker = new Worker<{ jobId: string }>(
   },
 );
 
+async function sendBatchCallback(batchId: string): Promise<void> {
+  const batch = await database.analysisBatch.findUnique({
+    where: { id: batchId },
+    include: { jobs: { orderBy: { batchPosition: 'asc' } } },
+  });
+  if (!batch) throw new UnrecoverableError('The batch does not exist');
+
+  try {
+    if (batch.jobs.length === 0 || batch.jobs.some((job) => job.status !== 'completed')) {
+      throw new UnrecoverableError('Only complete batches can be sent');
+    }
+    const result = assembleBatchResult(batch);
+    const serialized = JSON.stringify(result);
+    const bytes = Buffer.byteLength(serialized, 'utf8');
+    if (bytes > config.MAX_BATCH_JSON_BYTES) {
+      throw new UnrecoverableError('The combined batch JSON exceeds the configured size limit');
+    }
+    const callback = await callbackSender.send(result, `batch-${batch.id}-completed`);
+    await database.analysisBatch.update({
+      where: { id: batch.id },
+      data: {
+        callbackStatus: callback.attempts === 0 ? 'disabled' : 'sent',
+        callbackAttempts: { increment: callback.attempts },
+        callbackLastError: null,
+        resultHash: createHash('sha256').update(serialized).digest('hex'),
+        resultCharacterCount: serialized.length,
+        sentAt: callback.attempts === 0 ? null : new Date(),
+      },
+    });
+  } catch (error) {
+    await database.analysisBatch.update({
+      where: { id: batch.id },
+      data: {
+        callbackStatus: 'failed',
+        callbackAttempts: { increment: config.CALLBACK_MAX_ATTEMPTS },
+        callbackLastError: error instanceof Error ? error.message : 'Batch callback failed',
+      },
+    });
+    throw error;
+  }
+}
+
+async function resendCallback(jobId: string): Promise<void> {
+  const job = await database.job.findUnique({ where: { id: jobId } });
+  if (!job || !['completed', 'failed'].includes(job.status)) {
+    throw new UnrecoverableError('Only terminal jobs can resend callbacks');
+  }
+
+  try {
+    const completed = job.status === 'completed';
+    const result = await callbackSender.send(
+      {
+        jobId: job.id,
+        videoId: job.videoId,
+        status: completed ? 'completed' : 'failed',
+        analysis: completed ? job.resultJson : null,
+        ...(completed
+          ? { analysisCharacterCount: job.resultCharacterCount, error: null }
+          : {
+              error: {
+                code: job.errorCode ?? 'PROCESSING_FAILED',
+                message: job.errorMessage ?? 'Processing failed',
+              },
+            }),
+      },
+      `job-${job.id}-${completed ? 'completed' : 'failed'}`,
+    );
+    await store.callbackSent(job.id, result.attempts);
+  } catch (error) {
+    const callbackError =
+      error instanceof PipelineError
+        ? error
+        : new PipelineError('CALLBACK_FAILED', 'Callback delivery failed', true);
+    await store.callbackFailed(job.id, callbackError);
+    throw error;
+  }
+}
+
 worker.on('error', (error) => {
   logger.error({ err: error }, 'BullMQ worker error');
 });
 worker.on('failed', (job, error) => {
   logger.error(
-    { jobId: job?.data.jobId, attempt: job?.attemptsMade, err: error },
+    {
+      jobId: job?.data.jobId,
+      batchId: job?.data.batchId,
+      attempt: job?.attemptsMade,
+      err: error,
+    },
     'Analysis queue attempt failed',
   );
 });
