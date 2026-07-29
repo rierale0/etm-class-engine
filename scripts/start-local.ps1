@@ -23,8 +23,17 @@ if (-not (Test-Path -LiteralPath 'secrets/youtube_cookies')) {
     New-Item -ItemType File -Path 'secrets/youtube_cookies' | Out-Null
 }
 
-& docker info *> $null
-if ($LASTEXITCODE -ne 0) {
+$savedErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'SilentlyContinue'
+    & docker info *> $null
+    $dockerInfoExitCode = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+
+if ($dockerInfoExitCode -ne 0) {
     throw 'Docker Desktop no está listo. Espera a que termine de iniciar y vuelve a intentarlo.'
 }
 
