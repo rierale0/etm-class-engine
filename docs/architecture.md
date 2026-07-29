@@ -10,6 +10,7 @@ sequenceDiagram
     participant P as PostgreSQL
     participant Q as Redis/BullMQ
     participant W as Worker
+    participant T as PO Token provider
     participant O as Selected AI provider
 
     N->>C: Signed POST with video ID
@@ -20,6 +21,8 @@ sequenceDiagram
     A-->>N: 202 + status URL
     Q->>W: Attempt with exponential retry
     W->>P: Stage/progress updates
+    W->>T: Request video-bound PO Token
+    T-->>W: Short-lived attestation
     W->>W: yt-dlp metadata, download, FFmpeg chunks
     W->>O: Sequential timestamped transcription
     opt Visual analysis enabled twice
@@ -41,8 +44,9 @@ strict schema before it reaches PostgreSQL or n8n.
 The API and databases use the internal `172.29.0.0/24` Docker network. Caddy uses the reserved
 address `172.29.0.10` on that network and has an edge network
 for ACME and HTTPS. The worker has a separate egress network for YouTube, the configured AI
-providers, and n8n. No
-service other than Caddy publishes a host port.
+providers, n8n, and the private PO Token sidecar. The sidecar has no host port and the matching
+yt-dlp plugin is checksum-pinned in the worker image. No service other than Caddy publishes a host
+port.
 
 ## Durability and retries
 

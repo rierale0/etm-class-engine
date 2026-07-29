@@ -18,6 +18,23 @@ describe('AI provider configuration', () => {
     });
   });
 
+  it('accepts an internal HTTP PO Token provider and rejects non-HTTP schemes', () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        OPENAI_API_KEY: 'openai-key',
+        YOUTUBE_PO_TOKEN_PROVIDER_URL: 'http://pot-provider:4416',
+      }).YOUTUBE_PO_TOKEN_PROVIDER_URL,
+    ).toBe('http://pot-provider:4416');
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        OPENAI_API_KEY: 'openai-key',
+        YOUTUBE_PO_TOKEN_PROVIDER_URL: 'file:///run/secrets/provider',
+      }),
+    ).toThrow(/HTTP/);
+  });
+
   it('rejects OpenAI transcription models that cannot return segment timestamps', () => {
     expect(() =>
       loadConfig({

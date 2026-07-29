@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { classifyYoutubeError, PipelineError } from './errors.js';
-import { cookiesAvailable, downloadArgs, metadataArgs, validateMetadata } from './youtube.js';
+import {
+  cookiesAvailable,
+  downloadArgs,
+  metadataArgs,
+  poTokenArgs,
+  validateMetadata,
+} from './youtube.js';
 
 describe('YouTube validation', () => {
   const metadata = {
@@ -39,6 +45,28 @@ describe('YouTube validation', () => {
     expect(args).toContain('bestaudio/best');
     expect(args).not.toContain('sh');
     expect(args.at(-2)).toBe('--');
+  });
+
+  it('configures the mweb client and internal bgutil provider without exposing a host port', () => {
+    const providerUrl = 'http://pot-provider:4416/';
+    expect(poTokenArgs(providerUrl)).toEqual([
+      '--extractor-args',
+      'youtube:player_client=mweb',
+      '--extractor-args',
+      'youtubepot-bgutilhttp:base_url=http://pot-provider:4416',
+    ]);
+    expect(metadataArgs(metadata.id, false, providerUrl)).toEqual(
+      expect.arrayContaining(poTokenArgs(providerUrl)),
+    );
+    expect(
+      downloadArgs({
+        videoId: metadata.id,
+        outputTemplate: '/data/jobs/id/source.%(ext)s',
+        includeVideo: true,
+        poTokenProviderUrl: providerUrl,
+      }),
+    ).toEqual(expect.arrayContaining(poTokenArgs(providerUrl)));
+    expect(poTokenArgs('')).toEqual([]);
   });
 
   it('ignores placeholder cookie files and accepts Netscape exports', async () => {

@@ -18,6 +18,18 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Validate Docker Compose
+        env:
+          ETM_DOMAIN: classes.example.com
+          ACME_EMAIL: ci@example.com
+          POSTGRES_PASSWORD: ci-postgres-password
+          ETM_API_SECRET: ci-api-secret-at-least-32-characters
+          ALLOWED_CIDRS: 127.0.0.1/32
+        run: |
+          mkdir -p secrets
+          touch secrets/youtube_cookies
+          docker compose config --quiet
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

@@ -77,6 +77,7 @@ logger.info(
     transcriptionProvider: selectedProviders.transcription,
     analysisProvider: selectedProviders.analysis,
     visualProvider: selectedProviders.visual,
+    youtubePoTokensEnabled: config.YOUTUBE_PO_TOKEN_PROVIDER_URL !== '',
   },
   'AI providers configured',
 );
@@ -85,6 +86,7 @@ const pipeline = new ClassPipeline(
   store,
   new YoutubeClient({
     cookiesPath: config.YOUTUBE_COOKIES_PATH,
+    poTokenProviderUrl: config.YOUTUBE_PO_TOKEN_PROVIDER_URL,
     metadataTimeoutMs: config.YTDLP_METADATA_TIMEOUT_MS,
     downloadTimeoutMs: config.YTDLP_DOWNLOAD_TIMEOUT_MS,
     maxDurationSeconds: config.MAX_VIDEO_DURATION_SECONDS,

@@ -41,8 +41,8 @@ Edit `.env`:
 4. Set `ALLOWED_CIDRS` to the n8n and administrator public egress addresses.
 5. Set the ETM-owned channel IDs. Comma-separate multiple IDs.
 6. Keep concurrency at one until CPU, memory, disk, YouTube, and AI-provider behavior is measured.
-7. If login is required, export a Netscape cookie file from an authorized ETM account directly to
-   `secrets/youtube_cookies`; never transfer it through Git.
+7. Keep `YOUTUBE_PO_TOKEN_PROVIDER_URL=http://pot-provider:4416`. Cookies are optional and should
+   be added only for content that genuinely requires an account.
 
 ## 3. Validate and start
 
@@ -51,13 +51,27 @@ docker compose -f docker-compose.yml config --quiet
 docker compose -f docker-compose.yml build
 docker compose -f docker-compose.yml up -d
 docker compose -f docker-compose.yml ps
-docker compose -f docker-compose.yml logs --tail=100 api worker caddy
+docker compose -f docker-compose.yml logs --tail=100 api worker pot-provider caddy
 curl --fail https://classes.example.com/health
 curl --fail https://classes.example.com/ready
 ```
 
 Caddy obtains certificates automatically after DNS and ports are correct. The API container runs
-`prisma migrate deploy` before starting.
+`prisma migrate deploy` before starting. The `pot-provider` service must be healthy before the
+worker starts and never publishes port `4416` to the host.
+
+Verify plugin discovery with an owned test video:
+
+```bash
+docker compose -f docker-compose.yml exec -T worker \
+  yt-dlp --verbose --skip-download \
+  --extractor-args 'youtube:player_client=mweb' \
+  --extractor-args 'youtubepot-bgutilhttp:base_url=http://pot-provider:4416' \
+  -- 'https://www.youtube.com/watch?v=DEMOclass01' 2>&1 |
+  grep 'PO Token Providers'
+```
+
+The output should include `bgutil:http-1.3.1`.
 
 ## 4. End-to-end smoke test
 
@@ -100,7 +114,10 @@ database migrations may require a forward fix instead of a binary rollback.
 
 - **Caddy certificate failure:** verify DNS, clock, ports 80/443, and `caddy` logs.
 - **401 from a valid HMAC:** verify byte-identical JSON/path, Unix clock, and observed source IP.
-- **YouTube login required:** refresh the cookie file, keep it `0600`, then restart the worker.
+- **PO provider unhealthy:** inspect `docker compose logs pot-provider`; confirm `/ping` succeeds
+  inside its container and that the worker shares the `egress` network.
+- **YouTube login required:** first verify that verbose yt-dlp output includes
+  `bgutil:http-1.3.1`. Add cookies only when the video itself requires an account.
 - **Unexpected channel:** compare `yt-dlp --dump-single-json` channel ID with the allowlist.
 - **Stuck queue:** inspect Redis health, worker logs, and PostgreSQL `status/updatedAt`; the sweep
   runs every five minutes for rows stale at least thirty minutes.

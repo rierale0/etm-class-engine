@@ -95,6 +95,7 @@ services:
       MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-14400}
       ALLOWED_YOUTUBE_CHANNEL_IDS: ${ALLOWED_YOUTUBE_CHANNEL_IDS:-}
       YOUTUBE_COOKIES_PATH: /run/secrets/youtube_cookies
+      YOUTUBE_PO_TOKEN_PROVIDER_URL: ${YOUTUBE_PO_TOKEN_PROVIDER_URL-http://pot-provider:4416}
       YTDLP_METADATA_TIMEOUT_MS: ${YTDLP_METADATA_TIMEOUT_MS:-60000}
       YTDLP_DOWNLOAD_TIMEOUT_MS: ${YTDLP_DOWNLOAD_TIMEOUT_MS:-7200000}
       FFMPEG_TIMEOUT_MS: ${FFMPEG_TIMEOUT_MS:-7200000}
@@ -127,6 +128,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      pot-provider:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -138,6 +141,34 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
+
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:sha-7608dd5-node
+    restart: unless-stopped
+    init: true
+    expose:
+      - '4416'
+    networks:
+      - egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4416/ping').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
       start_period: 30s
 
   postgres:

@@ -34,9 +34,14 @@ Do not open 3000, 5432, or 6379 in UFW or the Contabo firewall. Docker publishes
 
 Video IDs match `^[A-Za-z0-9_-]{11}$`; the service constructs the URL. `yt-dlp`, FFmpeg, and
 FFprobe are invoked through `spawn` with argument arrays and `shell: false`. Duration, channel,
-livestream, playlist, disk, frame, request, and output limits bound resource use. Both Node
+livestream, playlist, disk, frame, request, and output limits bound resource use. Both application
 containers use `tini` and run as the unprivileged `node` user. Scratch directories are UUID scoped,
 mode `0700`, and removed after every attempt.
+
+The `bgutil` PO Token provider is pinned to a release commit, publishes no host port, runs
+read-only without Linux capabilities, and is reachable only by the worker on the egress network.
+Its matching plugin wheel is verified by SHA-256 while the worker image is built. The sidecar holds
+no Google password, account cookie, API key, or application data.
 
 ## Secret handling
 
@@ -53,8 +58,9 @@ principal; introduce distinct client keys before supporting multiple independent
 
 ## Known residual risks
 
-Cookie-based YouTube access can expire and may trigger provider challenges. Frame deduplication
-uses a small grayscale perceptual fingerprint and can still retain some semantically redundant
-screens. No public cancellation endpoint exists (operators can set `cancelRequestedAt` in
-PostgreSQL). PostgreSQL result access is protected by the same shared HMAC principal rather than
-per-user authorization.
+PO Tokens reduce but do not guarantee immunity from YouTube bot checks, rate limits, or upstream
+protocol changes. Cookie-based fallback access can expire and may trigger account challenges.
+Frame deduplication uses a small grayscale perceptual fingerprint and can still retain some
+semantically redundant screens. No public cancellation endpoint exists (operators can set
+`cancelRequestedAt` in PostgreSQL). PostgreSQL result access is protected by the same shared HMAC
+principal rather than per-user authorization.

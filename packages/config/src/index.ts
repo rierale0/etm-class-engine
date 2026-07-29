@@ -10,6 +10,14 @@ const optionalUrl = z
   .default('')
   .refine((value) => value === '' || URL.canParse(value), 'Must be empty or a valid URL');
 
+const optionalHttpUrl = z
+  .string()
+  .default('')
+  .refine((value) => {
+    if (value === '' || !URL.canParse(value)) return value === '';
+    return ['http:', 'https:'].includes(new URL(value).protocol);
+  }, 'Must be empty or a valid HTTP(S) URL');
+
 export const aiProviderSchema = z.enum(['openai', 'gemini']);
 export type AiProviderName = z.infer<typeof aiProviderSchema>;
 
@@ -35,6 +43,7 @@ const envSchema = z
     MAX_VIDEO_DURATION_SECONDS: z.coerce.number().int().positive().default(14_400),
     ALLOWED_YOUTUBE_CHANNEL_IDS: z.string().default(''),
     YOUTUBE_COOKIES_PATH: z.string().default('/run/secrets/youtube_cookies'),
+    YOUTUBE_PO_TOKEN_PROVIDER_URL: optionalHttpUrl,
     YTDLP_METADATA_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
     YTDLP_DOWNLOAD_TIMEOUT_MS: z.coerce.number().int().positive().default(7_200_000),
     FFMPEG_TIMEOUT_MS: z.coerce.number().int().positive().default(7_200_000),
