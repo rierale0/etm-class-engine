@@ -29,6 +29,8 @@ const envSchema = z
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     API_HOST: z.string().default('0.0.0.0'),
     API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+    LOCAL_UI_ENABLED: booleanString,
+    LOCAL_UI_ORIGIN: z.string().url().default('http://localhost:8080'),
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1),
     ETM_API_SECRET: z.string().min(32),

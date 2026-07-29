@@ -2,6 +2,43 @@ import { z } from 'zod';
 
 export const videoIdSchema = z.string().regex(/^[A-Za-z0-9_-]{11}$/);
 
+export function youtubeVideoId(input: string): string {
+  const value = input.trim();
+  if (videoIdSchema.safeParse(value).success) return value;
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('A valid YouTube URL is required');
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('A valid YouTube URL is required');
+  }
+
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  let candidate: string | null = null;
+  if (hostname === 'youtu.be') {
+    candidate = url.pathname.split('/').filter(Boolean)[0] ?? null;
+  } else if (
+    hostname === 'youtube.com' ||
+    hostname === 'm.youtube.com' ||
+    hostname === 'music.youtube.com' ||
+    hostname === 'youtube-nocookie.com'
+  ) {
+    if (url.pathname === '/watch') {
+      candidate = url.searchParams.get('v');
+    } else {
+      const [kind, id] = url.pathname.split('/').filter(Boolean);
+      if (['embed', 'live', 'shorts'].includes(kind ?? '')) candidate = id ?? null;
+    }
+  }
+
+  const parsed = videoIdSchema.safeParse(candidate);
+  if (!parsed.success) throw new Error('A valid YouTube video URL is required');
+  return parsed.data;
+}
+
 export const analyzeRequestSchema = z
   .object({
     title: z.string().trim().min(1).max(300),

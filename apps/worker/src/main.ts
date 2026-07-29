@@ -82,6 +82,12 @@ logger.info(
   'AI providers configured',
 );
 
+const callbackSender = new CallbackSender(
+  config.N8N_CALLBACK_URL,
+  config.N8N_CALLBACK_SECRET,
+  config.CALLBACK_MAX_ATTEMPTS,
+);
+
 const pipeline = new ClassPipeline(
   store,
   new YoutubeClient({
@@ -94,11 +100,7 @@ const pipeline = new ClassPipeline(
   }),
   new MediaProcessor(config.FFMPEG_TIMEOUT_MS, config.MIN_FREE_DISK_BYTES),
   ai,
-  new CallbackSender(
-    config.N8N_CALLBACK_URL,
-    config.N8N_CALLBACK_SECRET,
-    config.CALLBACK_MAX_ATTEMPTS,
-  ),
+  callbackSender,
   {
     jobDataRoot: config.JOB_DATA_ROOT,
     chunkSeconds: config.AUDIO_CHUNK_SECONDS,
@@ -113,6 +115,10 @@ const pipeline = new ClassPipeline(
 const worker = new Worker<{ jobId: string }>(
   queueName,
   async (bullJob) => {
+    if (bullJob.name === 'retry-callback') {
+      await resendCallback(bullJob.data.jobId);
+      return;
+    }
     const attempt = bullJob.attemptsMade + 1;
     try {
       await pipeline.process(bullJob.data.jobId, {
@@ -134,6 +140,42 @@ const worker = new Worker<{ jobId: string }>(
     maxStalledCount: 2,
   },
 );
+
+async function resendCallback(jobId: string): Promise<void> {
+  const job = await database.job.findUnique({ where: { id: jobId } });
+  if (!job || !['completed', 'failed'].includes(job.status)) {
+    throw new UnrecoverableError('Only terminal jobs can resend callbacks');
+  }
+
+  try {
+    const completed = job.status === 'completed';
+    const result = await callbackSender.send(
+      {
+        jobId: job.id,
+        videoId: job.videoId,
+        status: completed ? 'completed' : 'failed',
+        analysis: completed ? job.resultJson : null,
+        ...(completed
+          ? { analysisCharacterCount: job.resultCharacterCount, error: null }
+          : {
+              error: {
+                code: job.errorCode ?? 'PROCESSING_FAILED',
+                message: job.errorMessage ?? 'Processing failed',
+              },
+            }),
+      },
+      `job-${job.id}-${completed ? 'completed' : 'failed'}`,
+    );
+    await store.callbackSent(job.id, result.attempts);
+  } catch (error) {
+    const callbackError =
+      error instanceof PipelineError
+        ? error
+        : new PipelineError('CALLBACK_FAILED', 'Callback delivery failed', true);
+    await store.callbackFailed(job.id, callbackError);
+    throw error;
+  }
+}
 
 worker.on('error', (error) => {
   logger.error({ err: error }, 'BullMQ worker error');

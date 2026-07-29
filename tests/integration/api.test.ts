@@ -21,7 +21,7 @@ const path = '/v1/classes/DEMOclass01/analyze';
 const timestamp = Math.floor(Date.now() / 1000).toString();
 const openApps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
 
-function config(allowedCidrs = '127.0.0.1/32') {
+function config(allowedCidrs = '127.0.0.1/32', localUiEnabled = false) {
   return loadConfig({
     NODE_ENV: 'test',
     DATABASE_URL: 'postgresql://test:test@localhost/test',
@@ -30,10 +30,13 @@ function config(allowedCidrs = '127.0.0.1/32') {
     OPENAI_API_KEY: 'test',
     ALLOWED_CIDRS: allowedCidrs,
     CADDY_TRUSTED_PROXIES: '127.0.0.1/32',
+    LOCAL_UI_ENABLED: String(localUiEnabled),
+    LOCAL_UI_ORIGIN: 'http://localhost:8080',
+    ENABLE_VISUAL_ANALYSIS: String(localUiEnabled),
   });
 }
 
-function job(id = '39f5a245-b69d-4b99-95e9-a0e43c5e9ef9'): Job {
+function job(id = '39f5a245-b69d-4b99-95e9-a0e43c5e9ef9', overrides: Partial<Job> = {}): Job {
   const now = new Date();
   return {
     id,
@@ -57,6 +60,7 @@ function job(id = '39f5a245-b69d-4b99-95e9-a0e43c5e9ef9'): Job {
     startedAt: null,
     completedAt: null,
     updatedAt: now,
+    ...overrides,
   };
 }
 
@@ -67,9 +71,11 @@ function dependencies(
   }),
 ): ApiDependencies {
   return {
-    createJob,
+    createJob: vi.fn(createJob),
     enqueue: vi.fn().mockResolvedValue(undefined),
     getJob: vi.fn().mockResolvedValue(null),
+    listJobs: vi.fn().mockResolvedValue([]),
+    enqueueCallbackRetry: vi.fn().mockResolvedValue(undefined),
     ready: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
   };
@@ -179,5 +185,79 @@ describe('authenticated analysis API', () => {
       remoteAddress: '127.0.0.1',
     });
     expect(proxied.statusCode).toBe(202);
+  });
+});
+
+describe('local browser interface', () => {
+  it('serves the local UI only when explicitly enabled', async () => {
+    const disabled = await buildApp(config(), dependencies());
+    openApps.push(disabled);
+    expect((await disabled.inject({ method: 'GET', url: '/' })).statusCode).toBe(404);
+
+    const enabled = await buildApp(config('127.0.0.1/32', true), dependencies());
+    openApps.push(enabled);
+    const response = await enabled.inject({ method: 'GET', url: '/' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('ETM Class Engine');
+    expect(response.headers['content-security-policy']).not.toContain('upgrade-insecure-requests');
+    expect((await enabled.inject({ method: 'GET', url: '/ui/config' })).json()).toEqual({
+      visualAnalysisEnabled: true,
+    });
+  });
+
+  it('creates a local job from a YouTube URL and enforces same-origin writes', async () => {
+    const deps = dependencies();
+    const app = await buildApp(config('127.0.0.1/32', true), deps);
+    openApps.push(app);
+    const payload = {
+      videoUrl: 'https://www.youtube.com/watch?v=U_t4DLT7eVQ',
+      title: 'ETM English Class',
+      classDate: '2026-07-16',
+      teacher: 'Sebastián Mesías',
+      course: 'Workshops V8',
+      analyzeVisuals: true,
+    };
+    const forbidden = await app.inject({
+      method: 'POST',
+      url: '/ui/jobs',
+      headers: { origin: 'https://example.com' },
+      payload,
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/ui/jobs',
+      headers: { origin: 'http://localhost:8080' },
+      payload,
+    });
+    expect(accepted.statusCode).toBe(202);
+    expect(deps.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ videoId: 'U_t4DLT7eVQ' }),
+    );
+    expect(deps.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('queues callback redelivery without rerunning the analysis', async () => {
+    const deps = dependencies();
+    vi.mocked(deps.getJob).mockResolvedValue(
+      job(undefined, {
+        status: 'completed',
+        progress: 100,
+        callbackStatus: 'failed',
+        resultJson: { schema_version: 1 },
+      }),
+    );
+    const app = await buildApp(config('127.0.0.1/32', true), deps);
+    openApps.push(app);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/ui/jobs/39f5a245-b69d-4b99-95e9-a0e43c5e9ef9/retry-callback',
+      headers: { origin: 'http://localhost:8080' },
+      payload: {},
+    });
+    expect(response.statusCode).toBe(202);
+    expect(deps.enqueueCallbackRetry).toHaveBeenCalledOnce();
+    expect(deps.enqueue).not.toHaveBeenCalled();
   });
 });

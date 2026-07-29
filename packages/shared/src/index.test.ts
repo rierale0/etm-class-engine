@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { validAnalysis } from '../../../tests/fixtures/analysis.js';
-import { analysisSchema, videoIdSchema } from './index.js';
+import { analysisSchema, videoIdSchema, youtubeVideoId } from './index.js';
 
 describe('shared schemas', () => {
   it('validates only eleven-character YouTube IDs', () => {
     expect(videoIdSchema.safeParse('DEMOclass01').success).toBe(true);
     expect(videoIdSchema.safeParse('https://youtube.com').success).toBe(false);
     expect(videoIdSchema.safeParse('short').success).toBe(false);
+  });
+
+  it('extracts video ids only from supported YouTube URLs', () => {
+    expect(youtubeVideoId('https://www.youtube.com/watch?v=U_t4DLT7eVQ')).toBe('U_t4DLT7eVQ');
+    expect(youtubeVideoId('https://youtu.be/U_t4DLT7eVQ')).toBe('U_t4DLT7eVQ');
+    expect(youtubeVideoId('https://youtube.com/shorts/U_t4DLT7eVQ')).toBe('U_t4DLT7eVQ');
+    expect(() => youtubeVideoId('https://example.com/watch?v=U_t4DLT7eVQ')).toThrow();
+    expect(() => youtubeVideoId('https://youtube.com/playlist?list=abc')).toThrow();
   });
 
   it('enforces a strict analysis schema at every object level', () => {

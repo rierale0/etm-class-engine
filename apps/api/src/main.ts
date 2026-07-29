@@ -1,4 +1,5 @@
 import { Queue } from 'bullmq';
+import { randomUUID } from 'node:crypto';
 import { loadConfig } from '../../../packages/config/src/index.js';
 import { createDatabase, createJobIdempotently } from '../../../packages/database/src/index.js';
 import { queueName } from '../../../packages/shared/src/index.js';
@@ -14,7 +15,11 @@ const connection = {
   ...(redisUrl.username ? { username: decodeURIComponent(redisUrl.username) } : {}),
   ...(redisUrl.protocol === 'rediss:' ? { tls: {} } : {}),
 };
-const queue = new Queue<{ jobId: string }>(queueName, { connection });
+interface QueuePayload {
+  jobId: string;
+}
+
+const queue = new Queue<QueuePayload>(queueName, { connection });
 
 const dependencies: ApiDependencies = {
   createJob: (input) => createJobIdempotently(database, input),
@@ -32,6 +37,57 @@ const dependencies: ApiDependencies = {
     );
   },
   getJob: (jobId) => database.job.findUnique({ where: { id: jobId } }),
+  listJobs: (limit) =>
+    database.job.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        videoId: true,
+        status: true,
+        progress: true,
+        requestPayload: true,
+        warnings: true,
+        errorCode: true,
+        errorMessage: true,
+        callbackStatus: true,
+        callbackAttempts: true,
+        callbackLastError: true,
+        resultCharacterCount: true,
+        createdAt: true,
+        startedAt: true,
+        completedAt: true,
+        updatedAt: true,
+      },
+    }),
+  async enqueueCallbackRetry(jobId) {
+    await database.job.update({
+      where: { id: jobId },
+      data: { callbackStatus: 'pending', callbackLastError: null },
+    });
+    try {
+      await queue.add(
+        'retry-callback',
+        { jobId },
+        {
+          jobId: `callback-${jobId}-${randomUUID()}`,
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 30_000 },
+          removeOnComplete: { age: 7 * 24 * 60 * 60, count: 1_000 },
+          removeOnFail: { age: 30 * 24 * 60 * 60, count: 5_000 },
+        },
+      );
+    } catch (error) {
+      await database.job.update({
+        where: { id: jobId },
+        data: {
+          callbackStatus: 'failed',
+          callbackLastError: 'Callback retry could not be queued',
+        },
+      });
+      throw error;
+    }
+  },
   async ready() {
     await Promise.all([database.$queryRaw`SELECT 1`, queue.waitUntilReady()]);
   },

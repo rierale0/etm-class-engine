@@ -1,5 +1,27 @@
 # API
 
+## Local browser routes
+
+These routes exist only when `LOCAL_UI_ENABLED=true`, which is set by
+`docker-compose.local.yml`. They are intended for same-computer access through
+`http://localhost:8080`; mutating requests require the configured same-origin header.
+
+```text
+POST /ui/jobs
+GET  /ui/config
+GET  /ui/jobs
+GET  /ui/jobs/{jobId}
+GET  /ui/jobs/{jobId}/result
+POST /ui/jobs/{jobId}/retry-callback
+```
+
+`POST /ui/jobs` accepts `videoUrl`, `title`, `classDate`, `teacher`, `course`, and
+`analyzeVisuals`. The server accepts supported YouTube URL forms, extracts the fixed eleven
+character ID, generates idempotency internally, and queues one durable job. Callback retry is
+available only for terminal jobs with a failed callback and never requeues media or AI work.
+`GET /ui/config` exposes only non-secret UI capabilities, such as whether visual analysis is
+enabled.
+
 ## HMAC authentication
 
 Every `/v1` request requires:

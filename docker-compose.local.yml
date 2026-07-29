@@ -1,0 +1,18 @@
+services:
+  caddy:
+    profiles:
+      - remote-edge
+
+  api:
+    ports:
+      - '127.0.0.1:${ETM_LOCAL_PORT:-8080}:3000'
+    environment:
+      LOCAL_UI_ENABLED: 'true'
+      LOCAL_UI_ORIGIN: http://localhost:${ETM_LOCAL_PORT:-8080}
+      CADDY_TRUSTED_PROXIES: ''
+      ALLOWED_CIDRS: 127.0.0.1/32,::1/128
+      ENABLE_VISUAL_ANALYSIS: ${ENABLE_VISUAL_ANALYSIS:-false}
+
+  worker:
+    environment:
+      YOUTUBE_PO_TOKEN_PROVIDER_URL: ${YOUTUBE_PO_TOKEN_PROVIDER_URL:-}

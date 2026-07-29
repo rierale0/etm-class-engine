@@ -1,5 +1,9 @@
 # n8n integration
 
+The local browser form is the primary input. n8n receives the final signed callback and does not
+need inbound access to the computer running ETM Class Engine. The service-to-service request below
+remains supported for optional automation.
+
 ## Sending the analysis request
 
 In an n8n Code node, build the raw JSON once. Do not let a later node reserialize it differently

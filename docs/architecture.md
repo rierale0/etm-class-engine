@@ -1,27 +1,29 @@
 # Architecture
 
-## Request and processing flow
+## Local request and processing flow
 
 ```mermaid
 sequenceDiagram
-    participant N as n8n/client
-    participant C as Caddy
+    participant B as Local browser
     participant A as Fastify API
     participant P as PostgreSQL
     participant Q as Redis/BullMQ
     participant W as Worker
     participant T as PO Token provider
     participant O as Selected AI provider
+    participant N as n8n
 
-    N->>C: Signed POST with video ID
-    C->>A: Proxied request
-    A->>A: CIDR, timestamp, HMAC, body validation
+    B->>A: Same-origin form with YouTube URL
+    A->>A: Origin, URL, and body validation
     A->>P: Serializable idempotent job insert
     A->>Q: Enqueue durable job ID
-    A-->>N: 202 + status URL
+    A-->>B: 202 + job ID
+    B->>A: Poll job progress
     Q->>W: Attempt with exponential retry
     W->>P: Stage/progress updates
-    W->>T: Request video-bound PO Token
+    opt PO Token provider configured
+        W->>T: Request video-bound PO Token
+    end
     T-->>W: Short-lived attestation
     W->>W: yt-dlp metadata, download, FFmpeg chunks
     W->>O: Sequential timestamped transcription
@@ -41,12 +43,14 @@ The worker routes transcription, visual analysis, and synthesis independently to
 Both adapters return the same internal types, and final output is always checked against the same
 strict schema before it reaches PostgreSQL or n8n.
 
-The API and databases use the internal `172.29.0.0/24` Docker network. Caddy uses the reserved
-address `172.29.0.10` on that network and has an edge network
+In local mode, Docker publishes the API only at `127.0.0.1:8080`; Caddy is disabled. The API and
+databases use the internal `172.29.0.0/24` Docker network. In optional edge mode, Caddy uses the
+reserved address `172.29.0.10` on that network and has an edge network
 for ACME and HTTPS. The worker has a separate egress network for YouTube, the configured AI
 providers, n8n, and the private PO Token sidecar. The sidecar has no host port and the matching
-yt-dlp plugin is checksum-pinned in the worker image. No service other than Caddy publishes a host
-port.
+yt-dlp plugin is checksum-pinned in the worker image. In edge mode, no service other than Caddy
+publishes a host port. The HMAC API remains available for service-to-service automation, but the
+local browser never receives or handles its secret.
 
 ## Durability and retries
 
@@ -56,6 +60,10 @@ loss; a periodic database sweep re-enqueues old active rows missing from Redis. 
 for cancellation at safe boundaries (the current public status set has no cancellation endpoint).
 Non-final retryable attempts return the durable row to `queued`; terminal attempts store a
 sanitized failure and deliver a failure callback.
+
+A failed callback can be enqueued independently from the local dashboard. Callback redelivery
+reads the already stored terminal result and never invokes YouTube, FFmpeg, transcription, visual
+analysis, or synthesis again.
 
 The partial unique PostgreSQL index `Job_one_active_video_key` prevents concurrent active jobs for
 one video, including races. A completed or failed video may be intentionally submitted again with
