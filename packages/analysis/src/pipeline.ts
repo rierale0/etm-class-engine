@@ -21,6 +21,7 @@ export interface PipelineJob {
   id: string;
   videoId: string;
   requestPayload: unknown;
+  batchId?: string | null;
 }
 
 export interface JobStore {
@@ -32,7 +33,7 @@ export interface JobStore {
     characterCount: number,
     warnings: ProcessingWarning[],
   ): Promise<void>;
-  complete(id: string, callbackAttempts: number): Promise<void>;
+  complete(id: string, callbackAttempts: number, callbackStatus?: string): Promise<void>;
   fail(id: string, error: PipelineError): Promise<void>;
   retry(id: string, error: PipelineError): Promise<void>;
   callbackFailed(id: string, error: PipelineError): Promise<void>;
@@ -197,33 +198,37 @@ export class ClassPipeline {
 
       stage = 'sending_callback';
       await this.store.stage(job.id, stage, 95, context.attempt);
-      try {
-        const callback = await this.callback.send(
-          {
-            jobId: job.id,
-            videoId: job.videoId,
-            status: 'completed',
-            analysis,
-            analysisCharacterCount: characterCount,
-            error: null,
-          },
-          `job-${job.id}-completed`,
-        );
-        await this.store.complete(job.id, callback.attempts);
-      } catch (callbackError) {
-        const error = sanitizedError(callbackError);
-        await this.store.complete(job.id, 0);
-        await this.store.callbackFailed(job.id, error);
-        this.logger.error(
-          {
-            jobId: job.id,
-            videoId: job.videoId,
-            stage: 'sending_callback',
-            errorCode: error.code,
-            err: { name: error.name, message: error.message },
-          },
-          'Analysis completed but callback delivery failed',
-        );
+      if (job.batchId) {
+        await this.store.complete(job.id, 0, 'awaiting_batch');
+      } else {
+        try {
+          const callback = await this.callback.send(
+            {
+              jobId: job.id,
+              videoId: job.videoId,
+              status: 'completed',
+              analysis,
+              analysisCharacterCount: characterCount,
+              error: null,
+            },
+            `job-${job.id}-completed`,
+          );
+          await this.store.complete(job.id, callback.attempts);
+        } catch (callbackError) {
+          const error = sanitizedError(callbackError);
+          await this.store.complete(job.id, 0);
+          await this.store.callbackFailed(job.id, error);
+          this.logger.error(
+            {
+              jobId: job.id,
+              videoId: job.videoId,
+              stage: 'sending_callback',
+              errorCode: error.code,
+              err: { name: error.name, message: error.message },
+            },
+            'Analysis completed but callback delivery failed',
+          );
+        }
       }
       this.logger.info({
         jobId: job.id,
@@ -240,20 +245,22 @@ export class ClassPipeline {
       const finalFailure = !error.retryable || context.attempt >= context.maximumAttempts;
       if (finalFailure) {
         await this.store.fail(job.id, error);
-        try {
-          const callbackResult = await this.callback.send(
-            {
-              jobId: job.id,
-              videoId: job.videoId,
-              status: 'failed',
-              analysis: null,
-              error: { code: error.code, message: error.message },
-            },
-            `job-${job.id}-failed`,
-          );
-          await this.store.callbackSent(job.id, callbackResult.attempts);
-        } catch (callbackError) {
-          await this.store.callbackFailed(job.id, sanitizedError(callbackError));
+        if (!job.batchId) {
+          try {
+            const callbackResult = await this.callback.send(
+              {
+                jobId: job.id,
+                videoId: job.videoId,
+                status: 'failed',
+                analysis: null,
+                error: { code: error.code, message: error.message },
+              },
+              `job-${job.id}-failed`,
+            );
+            await this.store.callbackSent(job.id, callbackResult.attempts);
+          } catch (callbackError) {
+            await this.store.callbackFailed(job.id, sanitizedError(callbackError));
+          }
         }
       } else {
         await this.store.retry(job.id, error);

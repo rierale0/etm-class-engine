@@ -41,6 +41,12 @@ The worker routes transcription, visual analysis, and synthesis independently to
 Both adapters return the same internal types, and final output is always checked against the same
 strict schema before it reaches PostgreSQL or n8n.
 
+The web interface groups ordered jobs under a durable PostgreSQL `Batch`. Batch workers store
+results without issuing individual callbacks. After every class completes, an authenticated
+operator may deliver one compact payload to n8n. The payload preserves `order`, includes each
+class's submission metadata and structured analysis, and removes transcripts before transport.
+Standalone `/v1` jobs retain the original per-video callback behavior for backwards compatibility.
+
 The API and databases use the internal `172.29.0.0/24` Docker network. Caddy uses the reserved
 address `172.29.0.10` on that network and has an edge network
 for ACME and HTTPS. The worker has a separate egress network for YouTube, the configured AI

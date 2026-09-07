@@ -13,6 +13,7 @@ export class PrismaJobStore implements JobStore {
       id: job.id,
       videoId: job.videoId,
       requestPayload: job.requestPayload,
+      batchId: job.batchId,
     };
   }
 
@@ -44,13 +45,13 @@ export class PrismaJobStore implements JobStore {
     });
   }
 
-  async complete(id: string, callbackAttempts: number): Promise<void> {
+  async complete(id: string, callbackAttempts: number, callbackStatus?: string): Promise<void> {
     await this.database.job.update({
       where: { id },
       data: {
         status: 'completed',
         progress: 100,
-        callbackStatus: callbackAttempts === 0 ? 'disabled' : 'sent',
+        callbackStatus: callbackStatus ?? (callbackAttempts === 0 ? 'disabled' : 'sent'),
         callbackAttempts,
         completedAt: new Date(),
       },

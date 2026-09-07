@@ -4,7 +4,13 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'packages/database/prisma/**', 'eslint.config.js'],
+    ignores: [
+      'dist/**',
+      'apps/web/dist/**',
+      'node_modules/**',
+      'packages/database/prisma/**',
+      'eslint.config.js',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,

@@ -24,6 +24,7 @@ RUN apt-get update \
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/apps/web/dist ./web
 COPY --from=build --chown=node:node /app/packages/database/prisma ./packages/database/prisma
 USER node
 ENTRYPOINT ["/usr/bin/tini", "--"]

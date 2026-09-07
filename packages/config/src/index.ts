@@ -36,6 +36,10 @@ const envSchema = z
     CADDY_TRUSTED_PROXIES: z.string().default('172.16.0.0/12'),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
     RATE_LIMIT_WINDOW: z.string().default('1 minute'),
+    WEB_UI_ENABLED: booleanString,
+    WEB_ADMIN_PASSWORD: z.string().default(''),
+    WEB_SESSION_TTL_SECONDS: z.coerce.number().int().min(900).max(604_800).default(43_200),
+    WEB_ASSETS_PATH: z.string().default('web'),
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
     TRANSCRIPTION_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
     JOB_DATA_ROOT: z.string().default('/data/jobs'),
@@ -92,6 +96,13 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['OPENAI_TRANSCRIPTION_MODEL'],
         message: 'Must be whisper-1 because timestamped verbose_json transcription is required',
+      });
+    }
+    if (config.WEB_UI_ENABLED && config.WEB_ADMIN_PASSWORD.length < 12) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['WEB_ADMIN_PASSWORD'],
+        message: 'Must contain at least 12 characters when the web UI is enabled',
       });
     }
   });

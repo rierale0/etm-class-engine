@@ -39,6 +39,7 @@ class MemoryStore implements JobStore {
   failure?: PipelineError;
   callbackFailure?: PipelineError;
   completedCallbackAttempts?: number;
+  completedCallbackStatus: string | undefined;
 
   async get(): Promise<PipelineJob> {
     return this.job;
@@ -56,8 +57,9 @@ class MemoryStore implements JobStore {
     this.characterCount = count;
     this.warnings = warnings;
   }
-  async complete(_id: string, callbackAttempts: number): Promise<void> {
+  async complete(_id: string, callbackAttempts: number, callbackStatus?: string): Promise<void> {
     this.completedCallbackAttempts = callbackAttempts;
+    this.completedCallbackStatus = callbackStatus;
     this.stages.push('completed');
   }
   async fail(_id: string, error: PipelineError): Promise<void> {
@@ -245,6 +247,36 @@ describe('mocked class pipeline', () => {
     expect(store.failure).toBeUndefined();
     expect(ports.ai.synthesize).toHaveBeenCalledOnce();
     await expect(access(join(root, store.job.id))).rejects.toThrow();
+  });
+
+  it('stores batch results without sending an individual n8n callback', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'etm-batch-pipeline-'));
+    const store = new MemoryStore();
+    store.job.batchId = '27de533c-a370-4eac-8e72-78a1f8df606c';
+    const ports = makePorts();
+    const pipeline = new ClassPipeline(
+      store,
+      ports.youtube,
+      ports.media,
+      ports.ai,
+      ports.callback,
+      {
+        jobDataRoot: root,
+        chunkSeconds: 600,
+        overlapSeconds: 3,
+        visualAnalysisEnabled: false,
+        maximumFrames: 40,
+        maximumJsonCharacters: 95_000,
+      },
+      pino({ level: 'silent' }),
+    );
+
+    await pipeline.process(store.job.id, { attempt: 1, maximumAttempts: 1 });
+
+    expect(ports.callback.send).not.toHaveBeenCalled();
+    expect(store.completedCallbackAttempts).toBe(0);
+    expect(store.completedCallbackStatus).toBe('awaiting_batch');
+    expect(store.analysis).toBeDefined();
   });
 
   it('records a transcription failure and cleans up', async () => {

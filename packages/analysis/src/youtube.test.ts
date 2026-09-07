@@ -6,10 +6,13 @@ import { classifyYoutubeError, PipelineError } from './errors.js';
 import {
   cookiesAvailable,
   downloadArgs,
+  isYoutubeHttp403,
   metadataArgs,
   poTokenArgs,
+  YoutubeClient,
   validateMetadata,
 } from './youtube.js';
+import type { runProcess } from './process.js';
 
 describe('YouTube validation', () => {
   const metadata = {
@@ -91,6 +94,50 @@ describe('YouTube validation', () => {
       code: 'DOWNLOAD_FAILED',
       message: 'The YouTube cookie file is invalid',
       retryable: false,
+    });
+  });
+
+  it('retries HTTP 403 downloads with the web embedded client', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'etm-youtube-fallback-'));
+    const cookiesPath = join(directory, 'cookies.txt');
+    await writeFile(cookiesPath, '\n');
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (_executable, args) => {
+      calls.push([...args]);
+      if (calls.length === 1) {
+        throw new Error('yt-dlp exited with 1: HTTP Error 403: Forbidden');
+      }
+      return { stdout: `${directory}/audio.webm\n`, stderr: '' };
+    };
+    const client = new YoutubeClient(
+      {
+        cookiesPath,
+        poTokenProviderUrl: 'http://pot-provider:4416',
+        metadataTimeoutMs: 1_000,
+        downloadTimeoutMs: 1_000,
+        maxDurationSeconds: 10_000,
+        allowedChannelIds: [],
+      },
+      runner,
+    );
+
+    await expect(client.download(metadata.id, directory, false)).resolves.toBe(
+      `${directory}/audio.webm`,
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(expect.arrayContaining(poTokenArgs('http://pot-provider:4416')));
+    expect(calls[1]).toEqual(
+      expect.arrayContaining(['--extractor-args', 'youtube:player_client=web_embedded']),
+    );
+    expect(calls[1]).not.toContain('youtubepot-bgutilhttp:base_url=http://pot-provider:4416');
+  });
+
+  it('surfaces HTTP 403 download failures explicitly', () => {
+    expect(isYoutubeHttp403('unable to download video data: HTTP Error 403: Forbidden')).toBe(true);
+    expect(classifyYoutubeError('HTTP Error 403: Forbidden')).toMatchObject({
+      code: 'DOWNLOAD_FAILED',
+      message: 'YouTube rejected the media transfer (HTTP 403)',
+      retryable: true,
     });
   });
 });

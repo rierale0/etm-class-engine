@@ -5,6 +5,8 @@ dist/
 !.env.example
 coverage/
 data/
+docs/case-study-etm-class-engine.md
+docs/technical-summary-etm-class-engine.md
 outputs/
 tmp/
 *.log

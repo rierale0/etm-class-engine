@@ -22,6 +22,14 @@ import {
   verifyRequestSignature,
 } from '../../../packages/security/src/index.js';
 import { analyzeRequestSchema, videoIdSchema } from '../../../packages/shared/src/index.js';
+import {
+  registerUi,
+  UiConflictError,
+  UiDeliveryError,
+  UiNotFoundError,
+  UiRequestError,
+  type UiDependencies,
+} from './ui.js';
 
 export interface ApiJobView {
   id: string;
@@ -60,6 +68,7 @@ export async function buildApp(
   config: AppConfig,
   dependencies: ApiDependencies,
   logger?: FastifyBaseLogger,
+  uiDependencies?: UiDependencies,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger:
@@ -199,6 +208,8 @@ export async function buildApp(
     },
   );
 
+  if (uiDependencies) await registerUi(app, config, uiDependencies);
+
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {
       void reply.code(400).send({
@@ -206,6 +217,26 @@ export async function buildApp(
         error: 'Bad Request',
         message: 'Request validation failed',
       });
+      return;
+    }
+    if (error instanceof UiRequestError) {
+      void reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: error.message,
+      });
+      return;
+    }
+    if (error instanceof UiConflictError) {
+      void reply.code(409).send({ statusCode: 409, error: 'Conflict', message: error.message });
+      return;
+    }
+    if (error instanceof UiNotFoundError) {
+      void reply.code(404).send({ statusCode: 404, error: 'Not Found', message: error.message });
+      return;
+    }
+    if (error instanceof UiDeliveryError) {
+      void reply.code(502).send({ statusCode: 502, error: 'Bad Gateway', message: error.message });
       return;
     }
     if (error instanceof IdempotencyConflictError) {

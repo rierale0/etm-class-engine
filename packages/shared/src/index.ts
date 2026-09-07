@@ -14,6 +14,44 @@ export const analyzeRequestSchema = z
 
 export type AnalyzeRequest = z.infer<typeof analyzeRequestSchema>;
 
+export const batchVideoSchema = z
+  .object({
+    source: z.string().trim().min(1).max(500),
+    title: z.string().trim().min(1).max(300),
+  })
+  .strict();
+
+export const createBatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    teacher: z.string().trim().min(1).max(200),
+    course: z.string().trim().min(1).max(200),
+    classDate: z.string().date(),
+    analyzeVisuals: z.boolean().default(false),
+    videos: z.array(batchVideoSchema).min(1).max(50),
+  })
+  .strict();
+
+export type CreateBatchRequest = z.infer<typeof createBatchSchema>;
+
+export function youtubeVideoId(source: string): string | null {
+  const trimmed = source.trim();
+  if (videoIdSchema.safeParse(trimmed).success) return trimmed;
+  if (!URL.canParse(trimmed)) return null;
+  const url = new URL(trimmed);
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  let candidate: string | null = null;
+  if (hostname === 'youtu.be') {
+    candidate = url.pathname.split('/').filter(Boolean)[0] ?? null;
+  } else if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) {
+    if (url.pathname === '/watch') candidate = url.searchParams.get('v');
+    else if (/^\/(?:shorts|live|embed)\//.test(url.pathname)) {
+      candidate = url.pathname.split('/').filter(Boolean)[1] ?? null;
+    }
+  }
+  return candidate && videoIdSchema.safeParse(candidate).success ? candidate : null;
+}
+
 export const jobStatuses = [
   'queued',
   'validating_video',
