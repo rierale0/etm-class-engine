@@ -1,5 +1,34 @@
 # n8n integration
 
+## Operator-interface batch delivery
+
+The web interface sends one completed educational unit using the workflow's existing shape. It
+does not send one webhook per video:
+
+```json
+{
+  "data": {
+    "batch": {
+      "id": "uuid",
+      "name": "Conversation Club · August",
+      "createdAt": "2026-08-22T10:00:00.000Z",
+      "classCount": 2
+    },
+    "order": ["DEMOclass01", "DEMOclass02"],
+    "classes": {
+      "DEMOclass01": {
+        "submission": {},
+        "analysis": {}
+      }
+    }
+  }
+}
+```
+
+`analysis.transcript` is omitted deliberately. The application sends the same HMAC, timestamp,
+and stable idempotency headers described below. The workflow itself is external to this
+repository and is not created or modified by the application.
+
 ## Sending the analysis request
 
 In an n8n Code node, build the raw JSON once. Do not let a later node reserialize it differently

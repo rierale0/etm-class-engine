@@ -53,6 +53,8 @@ function job(id = '39f5a245-b69d-4b99-95e9-a0e43c5e9ef9'): Job {
     callbackAttempts: 0,
     callbackLastError: null,
     cancelRequestedAt: null,
+    batchId: null,
+    batchOrder: null,
     createdAt: now,
     startedAt: null,
     completedAt: null,

@@ -66,6 +66,13 @@ export function classifyYoutubeError(stderr: string): PipelineError {
       true,
     );
   }
+  if (value.includes('http error 403') || value.includes('403: forbidden')) {
+    return new PipelineError(
+      'DOWNLOAD_FAILED',
+      'YouTube rejected the media transfer (HTTP 403)',
+      true,
+    );
+  }
   if (value.includes('private video') || value.includes('members-only')) {
     return new PipelineError('VIDEO_NOT_AUTHORIZED', 'The video is not authorized', false);
   }

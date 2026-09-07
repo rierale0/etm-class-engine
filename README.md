@@ -13,6 +13,8 @@ OpenAI or Gemini, stores the result durably, and delivers it to n8n through a si
 - A secure HMAC-authenticated API with CIDR allowlisting, replay protection, rate limiting, and
   idempotent requests.
 - A durable asynchronous pipeline built with BullMQ, Redis, PostgreSQL, and Prisma.
+- A private operator interface for creating ordered multi-video batches, following progress,
+  reviewing analyses, retrying failures, and delivering a completed unit to n8n.
 - Provider routing between OpenAI and Gemini for transcription, synthesis, and optional visual
   analysis.
 - Media processing with `yt-dlp`, an automatic PO Token provider, and FFmpeg, plus bounded frame
@@ -138,6 +140,33 @@ docker compose ps
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
 ```
+
+Open `http://localhost:8080/` to use the operator interface. Set `WEB_ADMIN_PASSWORD` to a unique
+value of at least 12 characters before starting the stack. The browser receives a signed,
+HTTP-only session cookie; API and callback secrets are never exposed to client-side code.
+
+## Web batches and n8n delivery
+
+The operator interface accepts one to fifty YouTube IDs or URLs per batch. Shared course,
+teacher, date, and visual-analysis settings are applied to each ordered class. Every video remains
+an independent durable job, so one failure can be retried without repeating successful AI work.
+
+When all classes complete, the operator can send the batch to the configured
+`N8N_CALLBACK_URL`. Batch jobs do not emit the legacy per-video callback. Instead, the API sends
+one HMAC-signed payload using the existing n8n contract:
+
+```text
+data
+  batch
+  order[]
+  classes[videoId]
+    submission
+    analysis
+```
+
+Transcripts remain available in PostgreSQL and the interface but are removed before the batch
+leaves the application. A successful delivery state means n8n accepted the webhook; the current
+workflow responds immediately and completes its Notion work asynchronously.
 
 Only Caddy publishes host ports. PostgreSQL and Redis stay on internal Docker networks.
 

@@ -57,8 +57,16 @@ services:
       CADDY_TRUSTED_PROXIES: 172.29.0.10/32
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-30}
       RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
+      WEB_UI_ENABLED: ${WEB_UI_ENABLED:-true}
+      WEB_ADMIN_PASSWORD: ${WEB_ADMIN_PASSWORD}
+      WEB_SESSION_TTL_SECONDS: ${WEB_SESSION_TTL_SECONDS:-43200}
+      WEB_ASSETS_PATH: /app/web
+      N8N_CALLBACK_URL: ${N8N_CALLBACK_URL:-}
+      N8N_CALLBACK_SECRET: ${N8N_CALLBACK_SECRET:-}
+      CALLBACK_MAX_ATTEMPTS: ${CALLBACK_MAX_ATTEMPTS:-6}
     networks:
       - backend
+      - egress
     depends_on:
       postgres:
         condition: service_healthy

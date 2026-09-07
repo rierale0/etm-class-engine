@@ -87,3 +87,22 @@ failed
 - `GET /ready`: API can query PostgreSQL and connect to Redis; otherwise `503`.
 
 Request bodies are capped at 64 KiB. Zod rejects unknown body properties and malformed IDs.
+
+## Private operator interface
+
+The browser UI is served at `/` when `WEB_UI_ENABLED=true`. Its `/ui-api` routes use a signed,
+HTTP-only operator session rather than exposing the `/v1` HMAC secret to JavaScript.
+
+```text
+POST /ui-api/session
+POST /ui-api/session/logout
+GET  /ui-api/batches
+POST /ui-api/batches
+GET  /ui-api/batches/{uuid}
+POST /ui-api/jobs/{uuid}/retry
+POST /ui-api/batches/{uuid}/deliver
+```
+
+Mutating requests require the same-origin `X-ETM-UI: 1` marker. Login attempts are rate limited.
+Batch delivery is allowed only after every job completes and uses one stable idempotency key per
+batch. Once n8n accepts a batch, the UI prevents accidental duplicate delivery.

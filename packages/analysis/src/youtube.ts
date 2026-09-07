@@ -70,17 +70,22 @@ export function downloadArgs(input: {
   includeVideo: boolean;
   cookiesPath?: string;
   poTokenProviderUrl?: string;
+  playerClient?: 'mweb' | 'web_embedded';
 }): string[] {
   const format = input.includeVideo
     ? 'bv*[height<=1080]+ba/b[height<=1080]/best'
     : 'bestaudio/best';
+  const clientArgs =
+    input.playerClient === 'web_embedded'
+      ? ['--extractor-args', 'youtube:player_client=web_embedded']
+      : poTokenArgs(input.poTokenProviderUrl);
   return [
     '--no-playlist',
     '--no-progress',
     '--newline',
     '--js-runtimes',
     'node',
-    ...poTokenArgs(input.poTokenProviderUrl),
+    ...clientArgs,
     '--format',
     format,
     '--output',
@@ -130,7 +135,10 @@ export function validateMetadata(
 }
 
 export class YoutubeClient {
-  constructor(private readonly options: YoutubeOptions) {}
+  constructor(
+    private readonly options: YoutubeOptions,
+    private readonly processRunner: typeof runProcess = runProcess,
+  ) {}
 
   async getMetadata(videoId: string): Promise<YoutubeMetadata> {
     const hasCookies = await cookiesAvailable(this.options.cookiesPath);
@@ -138,7 +146,7 @@ export class YoutubeClient {
       value === '/run/secrets/youtube_cookies' ? this.options.cookiesPath : value,
     );
     try {
-      const result = await runProcess('yt-dlp', args, {
+      const result = await this.processRunner('yt-dlp', args, {
         timeoutMs: this.options.metadataTimeoutMs,
       });
       return validateMetadata(
@@ -166,16 +174,53 @@ export class YoutubeClient {
       ...(hasCookies ? { cookiesPath: this.options.cookiesPath } : {}),
     });
     try {
-      const { stdout } = await runProcess('yt-dlp', args, {
+      const { stdout } = await this.processRunner('yt-dlp', args, {
         timeoutMs: this.options.downloadTimeoutMs,
       });
       const path = stdout.trim().split(/\r?\n/).at(-1);
       if (!path) throw new Error('yt-dlp did not report a downloaded path');
       return path;
     } catch (error) {
-      throw classifyYoutubeError(error instanceof Error ? error.message : String(error));
+      const primaryMessage = error instanceof Error ? error.message : String(error);
+      if (!isYoutubeHttp403(primaryMessage)) throw classifyYoutubeError(primaryMessage);
+
+      const fallbackArgs = downloadArgs({
+        videoId,
+        outputTemplate,
+        includeVideo,
+        playerClient: 'web_embedded',
+        ...(hasCookies ? { cookiesPath: this.options.cookiesPath } : {}),
+      });
+      let fallbackStdout: string;
+      try {
+        const { stdout } = await this.processRunner('yt-dlp', fallbackArgs, {
+          timeoutMs: this.options.downloadTimeoutMs,
+        });
+        fallbackStdout = stdout;
+      } catch (fallbackError) {
+        const classified = classifyYoutubeError(
+          fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+        );
+        throw new PipelineError(classified.code, classified.message, classified.retryable, {
+          cause: fallbackError,
+        });
+      }
+      const path = fallbackStdout.trim().split(/\r?\n/).at(-1);
+      if (!path) {
+        throw new PipelineError(
+          'DOWNLOAD_FAILED',
+          'yt-dlp did not report a downloaded path',
+          true,
+          { cause: error },
+        );
+      }
+      return path;
     }
   }
+}
+
+export function isYoutubeHttp403(message: string): boolean {
+  return /(?:http error\s+403|403:\s*forbidden)/i.test(message);
 }
 
 export async function cookiesAvailable(path: string): Promise<boolean> {
